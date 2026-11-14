@@ -1,0 +1,8 @@
+{{define "head"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>QuickBooks</title>
+<style>body{font:14px system-ui,sans-serif;margin:12px}table{border-collapse:collapse}td,th{padding:4px 8px;border-bottom:1px solid #ddd;text-align:left}.banner{background:#fff3cd;padding:6px 10px;margin-bottom:10px}.done{color:#155724}.err{color:#721c24}</style>
+</head><body>
+{{if .Sandbox}}<div class="banner" data-banner="sandbox">Sandbox company: QuickBooks writes go to the Intuit sandbox, not the firm's books.</div>{{end}}
+{{if .Done}}<p class="done">{{.Done}}</p>{{end}}{{end}}
+{{define "foot"}}</body></html>{{end}}
+{{define "ctx"}}<input type="hidden" name="context" value="{{.}}">{{end}}

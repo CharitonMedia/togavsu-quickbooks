@@ -1,0 +1,6 @@
+{{template "head" .}}
+<h1>{{.Matter.Number}} {{.Matter.Name}} in QuickBooks</h1>
+{{if .Lines}}<table><thead><tr><th>Date</th><th>Record</th><th>Amount</th><th>QuickBooks</th><th>QBO id</th></tr></thead><tbody>
+{{range .Lines}}<tr data-line="{{.Kind}}/{{.ID}}"><td>{{.Date}}</td><td>{{.Label}}</td><td>{{money .AmountCents}}</td><td>{{.State}}</td><td>{{.QBOID}}</td></tr>
+{{end}}</tbody></table>{{else}}<p>No invoices, payments or trust entries on this matter yet.</p>{{end}}
+{{template "foot"}}

@@ -1,0 +1,21 @@
+{{template "head" .}}
+{{if .Note}}<p>{{.Note}}</p>{{else}}
+<h1>QuickBooks</h1>
+<p data-status>{{if eq .Connection "connected"}}Connected to {{.Company}}{{else if eq .Connection "reconnect_needed"}}Reconnect needed: pushes are paused{{else}}Not connected{{end}}.
+{{.Counts.Synced}} synced, {{.Counts.Pending}} pending, {{.Counts.Exceptions}} exceptions.{{if .LastRun}} Last reconcile {{when .LastRun}}.{{end}}</p>
+<form method="post" action="sync-now">{{template "ctx" .Context}}<button>Sync now</button></form>
+<p><a href="?context={{.Context}}&status=exceptions">Exceptions</a> · <a href="?context={{.Context}}&status=pending">Pending</a> · <a href="?context={{.Context}}&status=synced">Synced</a> · <a href="?context={{.Context}}&status=skipped">Skipped</a></p>
+<h2>{{.Status}}</h2>
+{{if .Rows}}<table><thead><tr><th>Record</th><th>State</th><th>What happened</th><th>QuickBooks fault</th><th>Attempts</th><th></th></tr></thead><tbody>
+{{range .Rows}}<tr data-row="{{.Kind}}/{{.RecordID}}"><td>{{.Kind}} {{.RecordID}}</td><td>{{.State}}{{if .WaitingOn}} (waiting on {{.WaitingOn}}){{end}}</td><td>{{.Reason}}{{.Code}}</td><td>{{.Error}}</td><td>{{.Attempts}}</td><td>
+{{if .CanRetry}}<form method="post" action="retry">{{template "ctx" $.Context}}<input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="id" value="{{.RecordID}}"><button>Retry</button></form>{{end}}
+{{if .CanDrift}}<form method="post" action="repush">{{template "ctx" $.Context}}<input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="id" value="{{.RecordID}}"><button>Re-push</button></form>
+<form method="post" action="acknowledge">{{template "ctx" $.Context}}<input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="id" value="{{.RecordID}}"><button>Acknowledge</button></form>{{end}}
+</td></tr>
+{{end}}</tbody></table>{{else}}<p>Nothing here.</p>{{end}}
+<h2>Books for {{.Month}}</h2>
+{{if .Lines}}<table><thead><tr><th>Date</th><th>Record</th><th>Amount</th><th>QuickBooks</th><th>QBO id</th></tr></thead><tbody>
+{{range .Lines}}<tr data-line="{{.Kind}}/{{.ID}}"><td>{{.Date}}</td><td>{{.Label}}</td><td>{{money .AmountCents}}</td><td>{{.State}}</td><td>{{.QBOID}}</td></tr>
+{{end}}</tbody><tfoot><tr><td></td><td>Togavsu total</td><td>{{money .Togavsu}}</td><td>In QuickBooks</td><td>{{money .InQBO}}</td></tr></tfoot></table>{{else}}<p>No records this month.</p>{{end}}
+{{end}}
+{{template "foot"}}

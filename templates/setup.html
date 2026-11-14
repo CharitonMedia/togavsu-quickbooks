@@ -1,0 +1,25 @@
+{{template "head" .}}
+<h1>QuickBooks setup</h1>
+<p>Register this redirect URI in the Intuit app: <code>{{.RedirectURI}}</code></p>
+<p>Connection: {{.Connection.State}}{{if .Connection.CompanyName}}, {{.Connection.CompanyName}} (realm {{.Connection.RealmID}}){{end}}{{if .Connection.LastError}}. {{.Connection.LastError}}{{end}}</p>
+{{if .CanAct}}
+{{if .ConnectURL}}<p><a href="{{.ConnectURL}}" target="_blank" rel="noopener" data-connect>Connect to QuickBooks</a> (opens its own window)</p>
+{{else}}<p>Connect needs the client ID in the module settings and the client secret below.</p>{{end}}
+<form method="post" action="client-secret">{{template "ctx" .Context}}<label>Client secret {{if .SecretSet}}(set){{else}}(not set){{end}} <input type="password" name="client_secret" autocomplete="off"></label><button>Save</button></form>
+{{if eq .Connection.State "connected"}}<form method="post" action="disconnect">{{template "ctx" .Context}}<button>Disconnect</button></form>{{end}}
+{{else}}<p>Only an admin can change the connection. Client secret {{if .SecretSet}}is set{{else}}is not set{{end}}.</p>{{end}}
+{{if .ChartProblem}}<p class="err">{{.ChartProblem}}</p>{{end}}
+{{if .Checks}}<h2>Mapping</h2><table><thead><tr><th>Setting</th><th>Value</th><th>Resolves to</th><th>Type</th><th></th></tr></thead><tbody>
+{{range .Checks}}<tr data-check="{{.Key}}"><td>{{.Label}}</td><td>{{.Value}}</td><td>{{if .Found}}{{.Name}} ({{.ID}}){{else}}not found{{end}}</td><td>{{.Type}}</td><td>{{if .OK}}right{{else}}wrong{{end}}</td></tr>
+{{end}}</tbody></table>{{end}}
+<h2>Trust bank map</h2><table><thead><tr><th>Togavsu trust account</th><th>QuickBooks bank</th></tr></thead><tbody>
+{{range .TrustBanks}}<tr><td>{{.Name}}</td><td>{{if $.CanAct}}<form method="post" action="trust-bank-map">{{template "ctx" $.Context}}<input type="hidden" name="trust_account_id" value="{{.TrustAccountID}}"><input name="qbo_account" value="{{.QBOAccount}}" placeholder="default trust bank"><button>Save</button></form>{{else}}{{.QBOAccount}}{{end}}</td></tr>
+{{end}}</tbody></table>
+{{if .Missing}}<p>Missing defaults: {{range $i, $m := .Missing}}{{if $i}}, {{end}}{{$m}}{{end}}.</p>{{end}}
+{{if .CanAct}}<form method="post" action="create-missing">{{template "ctx" .Context}}<button>Create missing accounts and items</button></form>
+<form method="post" action="reset">{{template "ctx" .Context}}<label>Type RESET to clear the sync tables <input name="confirm"></label><button>Reset sync</button></form>{{end}}
+{{if .Accounts}}<h2>QuickBooks accounts</h2><table><thead><tr><th>Id</th><th>Name</th><th>Type</th></tr></thead><tbody>
+{{range .Accounts}}<tr><td>{{.ID}}</td><td>{{.Name}}</td><td>{{.AccountType}}</td></tr>{{end}}</tbody></table>{{end}}
+{{if .Items}}<h2>QuickBooks items</h2><table><thead><tr><th>Id</th><th>Name</th><th>Type</th></tr></thead><tbody>
+{{range .Items}}<tr><td>{{.ID}}</td><td>{{.Name}}</td><td>{{.Type}}</td></tr>{{end}}</tbody></table>{{end}}
+{{template "foot"}}

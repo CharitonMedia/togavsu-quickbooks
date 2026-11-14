@@ -1,0 +1,8 @@
+{{template "head" .}}
+<p>QuickBooks {{if .Sandbox}}(Sandbox) {{end}}{{if eq .Connection "connected"}}connected to {{.Company}}{{else if eq .Connection "reconnect_needed"}}needs to be reconnected{{else}}not connected{{end}}</p>
+<ul>
+<li><a target="_top" href="{{index .Links "synced"}}" data-count="synced">{{.Counts.Synced}} synced</a></li>
+<li><a target="_top" href="{{index .Links "pending"}}" data-count="pending">{{.Counts.Pending}} pending</a></li>
+<li><a target="_top" href="{{index .Links "exceptions"}}" data-count="exceptions">{{.Counts.Exceptions}} exceptions</a></li>
+</ul>
+{{template "foot"}}

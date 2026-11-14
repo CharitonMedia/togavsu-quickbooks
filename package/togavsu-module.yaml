@@ -1,0 +1,310 @@
+# QuickBooks Sync: a one-way push of the firm's money records into QuickBooks Online.
+# Togavsu is the system of record; the module never writes a Togavsu money record.
+id: quickbooks
+name: QuickBooks Sync
+version: "1.0.0"
+author: Chariton Media
+homepage: https://github.com/CharitonMedia/togavsu-quickbooks
+license: Same as Togavsu
+price: Free
+container:
+  image: ghcr.io/charitonmedia/togavsu-quickbooks
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  port: 8080
+  events: /events
+permissions:
+  - scope: invoices:read
+    reason: Read sent invoices and their lines to post them to QuickBooks.
+  - scope: payments:read
+    reason: Read completed payments and reversals to post them.
+  - scope: expenses:read
+    reason: Read expenses for purchases mode and for invoice line checks.
+  - scope: trust:read
+    reason: Read trust accounts and every ledger entry to post them to the trust and liability accounts.
+  - scope: contacts:read
+    reason: Receive contact updates so QuickBooks customer names and addresses stay current.
+  - scope: matters:read
+    reason: Show a matter's sync state on the matter screen.
+  - scope: events:read
+    reason: Subscribe to invoice, payment, expense, trust and contact events.
+  - scope: books:read
+    reason: Read the firm's money records without a viewer, for the background sync and the nightly reconcile.
+  - scope: notifications:write
+    reason: Tell admins and accountants, by notification and email, when an item fails to sync.
+  - scope: module_secrets:write
+    reason: Keep the QuickBooks client secret and sign-in tokens sealed by the core, never in the module's own tables.
+widgets:
+  - id: sync-status
+    title: QuickBooks sync
+    path: /widget
+    size:
+      w: 4
+      h: 2
+    sizes:
+      - w: 4
+        h: 2
+      - w: 6
+        h: 3
+    target:
+      tab: books
+      params: [status]
+    roles: [admin, accountant]
+tabs:
+  - id: books
+    title: QuickBooks
+    placement: home
+    path: /books
+  - id: setup
+    title: QuickBooks setup
+    placement: home
+    path: /setup
+  - id: matter
+    title: QuickBooks
+    placement: matter
+    path: /matter
+sidebar:
+  - id: quickbooks
+    title: QuickBooks
+    path: /books
+    section: money
+    icon: ledger
+    order: 410
+notifications:
+  - kind: sync_problem
+    label: QuickBooks sync problem
+    default_channels: [in_app, email]
+help:
+  heading: QuickBooks
+  pages:
+    - id: overview
+      title: QuickBooks sync
+      keywords: [quickbooks, accountant, books, sync]
+      covers: [quickbooks.sync-status, /modules/quickbooks/tabs/books]
+      body: |
+        QuickBooks Sync sends the firm's money records from Togavsu to QuickBooks Online.
+        Togavsu stays the system of record; nothing in QuickBooks ever changes Togavsu.
+
+        **Where to find it:** Home > QuickBooks, or the QuickBooks entry in the Money
+        section of the sidebar. Admins and accountants also get the **QuickBooks sync**
+        widget for the home screen.
+
+        What posts:
+
+        - Billed contacts become QuickBooks customers.
+        - Sent invoices become invoices; write-offs become credit memos.
+        - Completed operating payments become payments; reversals void them.
+        - Every trust ledger entry becomes a journal entry between the trust bank account
+          and the client trust liability account. Trust money is never income.
+        - Expenses become purchases only when the admin picks purchases mode.
+
+        Records post within seconds of the change, and a nightly reconcile finds anything
+        that was missed.
+
+        **Agent endpoints:** every action on these screens is also a JSON endpoint under
+        `/m/quickbooks/api/` (status, books, retry, repush, acknowledge, sync-now, setup,
+        connect, disconnect, create-missing, trust-bank-map, client-secret, reset), called
+        with a context token. The OpenAPI document is at `/m/quickbooks/api/openapi.json`.
+    - id: connect
+      title: Connecting QuickBooks
+      keywords: [connect, oauth, sandbox, intuit]
+      covers: [/modules/quickbooks/tabs/setup]
+      body: |
+        **Where:** Home > QuickBooks setup. Only an admin can connect.
+
+        1. Create an app in the Intuit developer portal and copy its client ID into the
+           module's settings (Admin > Modules and marketplace > QuickBooks Sync > Settings).
+        2. Register the redirect URI the setup tab shows in the Intuit app.
+        3. Paste the app's client secret into the **Client secret** field on the setup tab
+           and save. The secret goes to the core's sealed secret store; the tab only shows
+           whether it is set.
+        4. Press **Connect**. Intuit's sign-in opens in its own window. Pick the company and
+           approve.
+
+        With the environment setting on sandbox, every QuickBooks page shows a Sandbox
+        company banner. **Disconnect** signs the module out of QuickBooks and keeps the
+        sync history. Connecting a different company is refused until an admin runs
+        **Reset sync** and types RESET.
+    - id: mapping
+      title: Account and item mapping
+      keywords: [accounts, items, mapping, chart of accounts]
+      covers: [/modules/quickbooks/tabs/setup]
+      body: |
+        **Where:** Admin > Modules and marketplace > QuickBooks Sync > Settings, checked on
+        Home > QuickBooks setup.
+
+        Each mapping setting holds a QuickBooks account or item Id (all digits) or its exact
+        full name. The setup tab shows what each one resolved to and whether its type fits:
+
+        - Trust bank and operating bank are Bank accounts.
+        - Trust liability is an Other Current Liability account.
+        - Earned from trust is an Income account.
+        - Items are Service or NonInventory items.
+
+        The setup tab lists every QuickBooks account and item with its Id to copy into the
+        settings. **Create missing accounts and items** adds the default accounts and items
+        that don't exist yet; it never creates a bank account. The **Trust bank map** points
+        each Togavsu trust account at its own QuickBooks bank account.
+    - id: exceptions
+      title: Exceptions and retry
+      keywords: [failed, retry, exception, drift]
+      covers: [/modules/quickbooks/tabs/books]
+      body: |
+        **Where:** Home > QuickBooks, Exceptions list. Admins and accountants can act.
+
+        - **Failed** items show the QuickBooks fault text and the attempts made. Press
+          **Retry** to send one again. Network faults retry on their own on the retry
+          schedule setting first.
+        - **Drift** means someone changed or deleted the entry in QuickBooks. **Re-push**
+          puts Togavsu's version back; **Acknowledge** accepts the QuickBooks version and
+          keeps the item quiet until the Togavsu record changes.
+        - **Sync now** runs the full reconcile at once.
+
+        New exceptions raise one QuickBooks sync problem notification for admins and
+        accountants per alert interval, emailed unless a person turned email off for it.
+    - id: trust
+      title: How trust money posts
+      keywords: [trust, iolta, liability, transfer]
+      covers: [/modules/quickbooks/tabs/books, /modules/quickbooks/tabs/matter]
+      body: |
+        Trust money is never income. Every trust ledger entry posts as a journal entry:
+
+        - **Deposit:** debit the trust bank, credit client trust liability for the client.
+        - **Withdrawal or refund:** debit client trust liability, credit the trust bank.
+        - **Adjustment:** positive like a deposit, negative like a withdrawal.
+        - **Transfer to operating that pays an invoice:** the trust side posts as above, and
+          the operating side posts as a payment to the operating bank applied to the
+          invoice.
+        - **Transfer to operating that pays no invoice:** four lines, adding a debit to the
+          operating bank and a credit to the earned-from-trust income account.
+        - **Reversal:** the original journal entry with every debit and credit swapped.
+
+        A trust payment is never posted on its own; its ledger entry posts instead. The
+        nightly reconcile checks each trust account's QuickBooks total against the ledger.
+        The matter screen's QuickBooks tab (Matter > QuickBooks) shows each record's state.
+events:
+  - invoice.*
+  - payment.*
+  - expense.*
+  - trust.entry_posted
+  - contact.updated
+data:
+  extends:
+    - name: invoice_sync
+      record: invoice
+      table: invoice_sync
+      key: invoice_id
+      columns:
+        - name: state
+        - name: synced_at
+        - name: last_error
+    - name: payment_sync
+      record: payment
+      table: payment_sync
+      key: payment_id
+      columns:
+        - name: state
+        - name: synced_at
+        - name: last_error
+  views:
+    - name: invoice_qbo
+      record: invoice
+      key: invoice_id
+      columns:
+        - name: state
+        - name: synced_at
+settings:
+  - key: qbo_client_id
+    label: Client ID of the firm's Intuit developer app
+    type: string
+    required: true
+  - key: qbo_environment
+    label: Which QuickBooks Online API the connection uses
+    type: enum
+    options: [sandbox, production]
+    default: sandbox
+    required: true
+  - key: sync_start_date
+    label: Records dated before this (YYYY-MM-DD) never sync; empty means the day QuickBooks was first connected
+    type: string
+  - key: account_operating_bank
+    label: Bank account for trust transfers into operating, and for payments in operating_bank mode
+    type: string
+    required: true
+  - key: account_trust_bank
+    label: Default trust bank account; the setup tab can map each Togavsu trust account to its own
+    type: string
+    required: true
+  - key: account_trust_liability
+    label: Other Current Liability account holding client trust balances
+    type: string
+    default: Client Trust Liability
+    required: true
+  - key: account_earned_from_trust
+    label: Income account for a trust transfer to operating that pays no invoice
+    type: string
+    default: Legal Fee Income
+    required: true
+  - key: payment_deposit
+    label: Where client payments land in QuickBooks
+    type: enum
+    options: [undeposited_funds, operating_bank]
+    default: undeposited_funds
+    required: true
+  - key: expense_push
+    label: Whether expenses also post as purchases
+    type: enum
+    options: [invoice_lines_only, purchases]
+    default: invoice_lines_only
+    required: true
+  - key: account_client_costs
+    label: Expense or Other Current Asset account for purchases mode
+    type: string
+    default: Client Costs Advanced
+  - key: account_expense_paid_from
+    label: Bank or Credit Card account for purchases mode
+    type: string
+  - key: item_legal_services
+    label: Item for time lines
+    type: string
+    default: Legal Services
+    required: true
+  - key: item_flat_fee
+    label: Item for flat fee lines
+    type: string
+    default: Flat Fee
+    required: true
+  - key: item_reimbursed_costs
+    label: Item for expense lines
+    type: string
+    default: Reimbursed Costs
+    required: true
+  - key: item_adjustment
+    label: Item for adjustment lines and the invoice adjustment
+    type: string
+    default: Invoice Adjustment
+    required: true
+  - key: item_interest
+    label: Item for interest
+    type: string
+    default: Late Interest
+    required: true
+  - key: item_write_off
+    label: Item for write-off credit memos
+    type: string
+    default: Write-Off
+    required: true
+  - key: reconcile_hour_utc
+    label: Hour (UTC) the nightly reconcile starts; 8 is 2 or 3 a.m. Central
+    type: int
+    default: "8"
+    required: true
+  - key: retry_schedule
+    label: Waits between retries of a retryable fault, comma separated; the row fails after the last
+    type: string
+    default: 1m,5m,30m,2h,6h
+    required: true
+  - key: alert_interval_minutes
+    label: How often new exceptions are gathered into one sync problem alert (minutes)
+    type: int
+    default: "15"
+    required: true
