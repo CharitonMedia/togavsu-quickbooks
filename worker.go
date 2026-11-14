@@ -309,7 +309,7 @@ func (s *Server) pushDue(ctx context.Context) error {
 func dueCount() string {
 	var parts []string
 	for _, t := range tables {
-		parts = append(parts, "(SELECT count(*) FROM "+t.Name+" WHERE state = 'pending' AND next_attempt_at <= $1)")
+		parts = append(parts, "(SELECT count(*) FROM "+t.Name+" WHERE (state = 'pending' AND next_attempt_at <= $1) OR (state = 'failed' AND last_error_code = '"+codeMapping+"'))")
 	}
 	return "SELECT " + strings.Join(parts, " + ")
 }

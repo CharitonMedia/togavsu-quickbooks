@@ -202,12 +202,18 @@ func (st *store) save(ctx context.Context, r *Row) error {
 // queue marks a record's row pending and due now, creating it if needed. A new event on
 // a failed row resets its attempts. A drift row stays drift until a person decides.
 func (st *store) queue(ctx context.Context, t *table, key string, now int64) error {
+	set := `
+  state = CASE WHEN ` + t.Name + `.state = 'drift' THEN 'drift' ELSE 'pending' END,
+  skip_reason = CASE WHEN ` + t.Name + `.state = 'acknowledged' THEN 'acknowledged' ELSE '' END,
+  attempts = CASE WHEN ` + t.Name + `.state = 'failed' THEN 0 ELSE ` + t.Name + `.attempts END,
+  next_attempt_at = $2, updated_at = $2`
+	if t == tCustomer {
+		// a customer row is made with its contact by newCustomerRow; here it only requeues
+		_, err := st.db.ExecContext(ctx, `UPDATE customer_sync SET`+set+` WHERE id = $1`, key, now)
+		return err
+	}
 	_, err := st.db.ExecContext(ctx, `INSERT INTO `+t.Name+` (`+t.Key+`, state, next_attempt_at, updated_at) VALUES ($1, 'pending', $2, $2)
-ON CONFLICT (`+t.Key+`) DO UPDATE SET
-  state = CASE WHEN `+t.Name+`.state = 'drift' THEN 'drift' ELSE 'pending' END,
-  skip_reason = CASE WHEN `+t.Name+`.state = 'acknowledged' THEN 'acknowledged' ELSE '' END,
-  attempts = CASE WHEN `+t.Name+`.state = 'failed' THEN 0 ELSE `+t.Name+`.attempts END,
-  next_attempt_at = $2, updated_at = $2`, key, now)
+ON CONFLICT (`+t.Key+`) DO UPDATE SET`+set, key, now)
 	return err
 }
 
