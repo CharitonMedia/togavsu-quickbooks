@@ -49,6 +49,7 @@ type pass struct {
 
 	invoiceVoids []voidJob
 	paymentVoids []voidJob
+	waited       []*Row
 }
 
 type voidJob struct {
@@ -330,6 +331,15 @@ func (p *pass) run(ctx context.Context) error {
 			}
 		}
 	}
+	// A row that waited on one pushed later in this pass (a reversal on its original,
+	// a payment on its invoice) gets one more turn now.
+	waited := p.waited
+	p.waited = nil
+	for _, r := range waited {
+		if err := p.one(ctx, r); err != nil {
+			return err
+		}
+	}
 	for _, j := range p.paymentVoids {
 		if err := p.finish(ctx, j.r, p.voidPayment(ctx, j.r)); err != nil {
 			return err
@@ -417,6 +427,7 @@ func (p *pass) finish(ctx context.Context, r *Row, err error) error {
 		return err
 	case errors.As(err, &we):
 		r.State, r.WaitingOn, r.NextAttemptAt = statePending, we.on, now
+		p.waited = append(p.waited, r)
 	case errors.As(err, &se):
 		if r.State != stateSkipped || r.SkipReason != se.reason {
 			logged = logEntry{Op: "skip", Outcome: "ok", Message: se.reason}

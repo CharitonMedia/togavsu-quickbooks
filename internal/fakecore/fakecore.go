@@ -171,7 +171,11 @@ func (c *Core) AddUser(name string, roles ...string) string {
 }
 
 // SetEmail turns a user's email preference for sync_problem on or off.
-func (c *Core) SetEmail(userID string, on bool) { c.mu.Lock(); c.users[userID].EmailOn = on; c.mu.Unlock() }
+func (c *Core) SetEmail(userID string, on bool) {
+	c.mu.Lock()
+	c.users[userID].EmailOn = on
+	c.mu.Unlock()
+}
 
 // AddContact adds a contact.
 func (c *Core) AddContact(b quickbooks.BooksContact) string {
@@ -217,7 +221,11 @@ func (c *Core) Wall(matterID string, members ...string) {
 }
 
 // Unwall lifts a wall.
-func (c *Core) Unwall(matterID string) { c.mu.Lock(); c.matters[matterID].Walled = false; c.mu.Unlock() }
+func (c *Core) Unwall(matterID string) {
+	c.mu.Lock()
+	c.matters[matterID].Walled = false
+	c.mu.Unlock()
+}
 
 // AddTrustAccount adds a trust bank account.
 func (c *Core) AddTrustAccount(name string) string {
@@ -473,10 +481,18 @@ func (c *Core) AddExpense(matterID, date, desc string, cents int64, billable boo
 }
 
 // Invoice returns a copy of a core invoice.
-func (c *Core) Invoice(id string) quickbooks.Invoice { c.mu.Lock(); defer c.mu.Unlock(); return *c.invoices[id] }
+func (c *Core) Invoice(id string) quickbooks.Invoice {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return *c.invoices[id]
+}
 
 // Payment returns a copy of a core payment.
-func (c *Core) Payment(id string) quickbooks.Payment { c.mu.Lock(); defer c.mu.Unlock(); return *c.payments[id] }
+func (c *Core) Payment(id string) quickbooks.Payment {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return *c.payments[id]
+}
 
 // HardDeleteContact deletes a contact row; a module foreign key refuses it, and the error
 // names the module whose schema holds the constraint.

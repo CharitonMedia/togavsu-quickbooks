@@ -274,7 +274,9 @@ func (e *env) row(table, key, id string) (rowState, bool) {
 
 func (e *env) invoiceRow(id string) rowState { return e.must(e.row("invoice_sync", "invoice_id", id)) }
 func (e *env) paymentRow(id string) rowState { return e.must(e.row("payment_sync", "payment_id", id)) }
-func (e *env) trustRow(id string) rowState   { return e.must(e.row("trust_entry_sync", "trust_entry_id", id)) }
+func (e *env) trustRow(id string) rowState {
+	return e.must(e.row("trust_entry_sync", "trust_entry_id", id))
+}
 func (e *env) expenseRow(id string) rowState { return e.must(e.row("expense_sync", "expense_id", id)) }
 
 func (e *env) must(r rowState, ok bool) rowState {
