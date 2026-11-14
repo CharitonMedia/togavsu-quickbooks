@@ -44,7 +44,7 @@ func TestPackageSignsAndVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signed, held, err := quickbooks.Build(priv)
+	signed, ip, err := quickbooks.Build(priv)
 	if err != nil {
 		var refs modulekit.Refusals
 		if errors.As(err, &refs) {
@@ -54,14 +54,10 @@ func TestPackageSignsAndVerifies(t *testing.T) {
 		}
 		t.Fatalf("build with a valid key: %v (%s)", err, modulekit.Code(err))
 	}
-	entries, err := quickbooks.Pending()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range modulekit.Unused(entries, held) {
+	for _, e := range ip.Unused {
 		t.Errorf("pending %s (%s) holds nothing back: the pinned core accepts it or the package no longer has it; drop its entry", e.Part(), e.Core)
 	}
-	for _, h := range held {
+	for _, h := range ip.Held {
 		t.Log(h.String())
 		for _, r := range h.Refusals {
 			switch r.Code {

@@ -37,5 +37,8 @@ jobs:
         run: until pg_isready -h 127.0.0.1 -p 5432 -U togavsu; do sleep 1; done
       - name: go test
         run: go test -race -count=1 ./...
+      # The core's install check on the package, as the marketplace checks it: the
+      # parts package/pending.yaml lists that the pinned core refuses held back, and
+      # (-strict) an entry that holds nothing back fails.
       - name: Module check
-        run: go run github.com/CharitonMedia/togavsu/cmd/togavsu-module check -installable package
+        run: go run github.com/CharitonMedia/togavsu/cmd/togavsu-module check -installable -strict package

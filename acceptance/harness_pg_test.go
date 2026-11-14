@@ -146,14 +146,16 @@ func newSuite(t *testing.T) *suite {
 // criteria run. Any refusal pending.yaml doesn't cover fails the test.
 func (s *suite) installable() map[string][]byte {
 	s.t.Helper()
-	files, held, err := quickbooks.Installable()
+	ip, err := quickbooks.Installable()
 	if err != nil {
 		s.t.Fatalf("the core refuses the package: %v (%s)", err, modulekit.Code(err))
 	}
-	for _, h := range held {
-		s.missing[h.Pending.Core] = true
+	for _, h := range ip.Held {
+		for _, item := range h.Pending.Core {
+			s.missing[item] = true
+		}
 	}
-	return files
+	return ip.Files
 }
 
 // probe marks the API items the running core lacks.

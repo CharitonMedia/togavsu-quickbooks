@@ -41,12 +41,13 @@ func Files() (map[string][]byte, error) {
 }
 
 // Installable is the package the pinned core accepts: the files without pending.yaml and
-// without each part it lists that the core still refuses (modulekit.Installable). It also
-// returns the parts it held back. A refusal pending.yaml doesn't cover is an error.
-func Installable() (map[string][]byte, []modulekit.Held, error) {
+// without each part it lists that the core still refuses (modulekit.Installable), with
+// the parts it held back and the entries that held nothing back. A refusal pending.yaml
+// doesn't cover is an error.
+func Installable() (modulekit.InstallablePackage, error) {
 	files, err := Files()
 	if err != nil {
-		return nil, nil, err
+		return modulekit.InstallablePackage{}, err
 	}
 	return modulekit.Installable(files)
 }
@@ -61,20 +62,20 @@ func Pending() ([]modulekit.Pending, error) {
 }
 
 // Build signs the installable package with priv into the signed package file the core
-// installs (modulekit.BuildInstallable), and returns the parts it held back.
-func Build(priv ed25519.PrivateKey) ([]byte, []modulekit.Held, error) {
+// installs (modulekit.BuildInstallable), and returns Installable's result with it.
+func Build(priv ed25519.PrivateKey) ([]byte, modulekit.InstallablePackage, error) {
 	files, err := Files()
 	if err != nil {
-		return nil, nil, err
+		return nil, modulekit.InstallablePackage{}, err
 	}
 	return modulekit.BuildInstallable(priv, files)
 }
 
 // Archive is the installable package (gzip tar), without the held-back parts.
 func Archive() ([]byte, error) {
-	files, _, err := Installable()
+	ip, err := Installable()
 	if err != nil {
 		return nil, err
 	}
-	return modulekit.Archive(files)
+	return modulekit.Archive(ip.Files)
 }
