@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -352,4 +353,22 @@ func equal(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func coreGet(t *testing.T, e *env, path, tok string, out any) error {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, e.core.URL()+path, nil)
+	req.Header.Set("Authorization", "Bearer "+e.core.Token)
+	if tok != "" {
+		req.Header.Set(wire.ContextHeader, tok)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %d", res.StatusCode)
+	}
+	return json.NewDecoder(res.Body).Decode(out)
 }
