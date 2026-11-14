@@ -66,23 +66,35 @@ viewer's context token in `X-Togavsu-Context-Token`. The OpenAPI description is 
 ## Build
 
 ```
+gofmt -l .
 go vet ./...
-go test ./...
+go test -race ./...
+go run github.com/CharitonMedia/togavsu/cmd/togavsu-module check package
 docker build -t togavsu-quickbooks .
 ```
 
-The acceptance tests (`TestMODQBO01Install` through `TestMODQBO34TunableSettings`) run
-against an in-memory QuickBooks (`qbo/fake`), a fake core (`internal/fakecore`) and a
-Postgres database named in `TOGAVSU_TEST_DATABASE_URL`; they skip when it is unset outside
-CI. Use a database of your own, such as `togavsu_quickbooks`: each test drops and
-recreates its `core` and `mod_quickbooks` schemas. No test reaches Intuit.
+The module builds on the public module kit, `pkg/modulekit` in the core, pinned in
+`go.mod`. Two suites cover `MOD-QBO-01` through `MOD-QBO-34`, both against an in-memory
+QuickBooks (`qbo/fake`) and Postgres named in `TOGAVSU_TEST_DATABASE_URL`. Both skip when
+it is unset outside CI and fail in CI without it. No test reaches Intuit.
+
+- The root package runs every criterion on a fake core (`internal/fakecore`). Each test
+  drops and recreates the `core` and `mod_quickbooks` schemas in that database, so use a
+  database of your own, such as `togavsu_quickbooks`.
+- `acceptance` runs the same criteria on the composed core, `pkg/modulekit/coretest`. It
+  signs the package with a throwaway key, trusts the key, installs and approves it, and
+  serves the module in process. coretest creates and drops its own databases and roles, so
+  the URL must be a superuser's. A criterion that needs a core item the pinned core lacks
+  skips naming that `CORE-NN` item (see `docs/SPEC.md`, "Where this module builds"), and
+  passes once the core lands it and the pin moves.
 
 ## Signing
 
-`quickbooks package -key signing.key -out quickbooks.signed.json` builds the signed
-package through the `Packager` interface in `package.go`. The archive and signature formats
-belong to the core, so the module does not copy them: until the core publishes a public
-signing package or CLI, the stub packager answers that packaging is unavailable.
+`quickbooks package -key signing.key -out quickbooks.signed.json` checks the package with
+`modulekit.Check`, signs it with `modulekit.Build` and prints the public key to trust.
+`signing.key` holds the Ed25519 seed the kit's `ParseSeed` reads. `quickbooks.Archive`
+gives the installable tar (`modulekit.Archive`). The manifest's container image digest is
+a placeholder that the release workflow pins.
 
 ## License
 

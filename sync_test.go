@@ -8,6 +8,7 @@ import (
 
 	quickbooks "github.com/CharitonMedia/togavsu-quickbooks"
 	"github.com/CharitonMedia/togavsu-quickbooks/internal/fakecore"
+	"github.com/CharitonMedia/togavsu-quickbooks/internal/wire"
 	"github.com/CharitonMedia/togavsu-quickbooks/qbo"
 )
 
@@ -35,6 +36,28 @@ func TestMODQBO19DuplicateEvents(t *testing.T) {
 	}
 	if creates != 1 || e.invoiceRow(inv).State != "synced" {
 		t.Fatalf("%d invoice creates", creates)
+	}
+}
+
+// TestEventTakenAgainAfterFailedQueue: an event the module could not queue is not
+// recorded, so the core's redelivery is taken and queues the row.
+func TestEventTakenAgainAfterFailedQueue(t *testing.T) {
+	e := newEnv(t)
+	ev := wire.EventPayload{ID: "evt-late-invoice", Action: "invoice.sent", RecordType: "invoice", RecordID: "inv-not-yet", OccurredAt: e.clock.Now().Format(time.RFC3339)}
+	if code := e.core.Deliver(ev); code != http.StatusInternalServerError {
+		t.Fatalf("an event for a record the core table lacks answered %d", code)
+	}
+	if n := e.count(`SELECT count(*) FROM received_events WHERE event_id = $1`, ev.ID); n != 0 {
+		t.Fatal("the failed event was recorded")
+	}
+	if _, err := e.db.Exec(`INSERT INTO core.invoices (id) VALUES ($1)`, ev.RecordID); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.core.Deliver(ev); code != http.StatusNoContent {
+		t.Fatalf("redelivery %d", code)
+	}
+	if r := e.invoiceRow(ev.RecordID); r.State != "pending" {
+		t.Fatalf("row %+v", r)
 	}
 }
 

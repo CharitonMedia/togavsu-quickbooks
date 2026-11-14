@@ -7,9 +7,10 @@ package quickbooks
 import (
 	"crypto/ed25519"
 	"embed"
-	"errors"
 	"io/fs"
 	"strings"
+
+	"github.com/CharitonMedia/togavsu/pkg/modulekit"
 )
 
 // ID is the module id from the manifest.
@@ -38,33 +39,30 @@ func Files() (map[string][]byte, error) {
 	return out, err
 }
 
-// Packager turns the package files into the marketplace's signed package file. The
-// archive format and the signature are the core's to define, so the module does not
-// reimplement them: a Packager comes from the core's public signing package or CLI once
-// it exists.
-type Packager interface {
-	Sign(files map[string][]byte, priv ed25519.PrivateKey) ([]byte, error)
-}
-
-// ErrPackagingUnavailable is what the stub packager answers.
-var ErrPackagingUnavailable = errors.New("quickbooks: signing and packaging wait on the core's public signing package or CLI")
-
-// StubPackager is the placeholder until the core publishes its signing path.
-type StubPackager struct{}
-
-// Sign always answers ErrPackagingUnavailable.
-func (StubPackager) Sign(map[string][]byte, ed25519.PrivateKey) ([]byte, error) {
-	return nil, ErrPackagingUnavailable
-}
-
-// Build signs the package with priv through p (StubPackager when p is nil).
-func Build(p Packager, priv ed25519.PrivateKey) ([]byte, error) {
-	if p == nil {
-		p = StubPackager{}
-	}
+// Build signs the embedded package with priv into the signed package file the core
+// installs.
+func Build(priv ed25519.PrivateKey) ([]byte, error) {
 	files, err := Files()
 	if err != nil {
 		return nil, err
 	}
-	return p.Sign(files, priv)
+	return SignFile(priv, files)
+}
+
+// SignFile runs the core's install checks on package files and signs them with priv,
+// through the core's module kit. It refuses to sign what the core would refuse.
+func SignFile(priv ed25519.PrivateKey, files map[string][]byte) ([]byte, error) {
+	if _, _, err := modulekit.Check(files); err != nil {
+		return nil, err
+	}
+	return modulekit.Build(priv, files)
+}
+
+// Archive is the installable package (gzip tar) of the package files.
+func Archive() ([]byte, error) {
+	files, err := Files()
+	if err != nil {
+		return nil, err
+	}
+	return modulekit.Archive(files)
 }

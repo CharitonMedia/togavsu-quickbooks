@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   test:
-    name: Vet and test
+    name: Format, vet, test and check
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -17,22 +17,25 @@ jobs:
           POSTGRES_DB: togavsu_quickbooks
         ports:
           - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U togavsu -d togavsu_quickbooks"
-          --health-interval 5s
-          --health-retries 12
     env:
+      # A superuser URL: pkg/modulekit/coretest creates and drops its own databases and roles,
+      # and the fake-core suite recreates its schemas in togavsu_quickbooks.
       TOGAVSU_TEST_DATABASE_URL: postgres://togavsu:synthetic-postgres-password@127.0.0.1:5432/togavsu_quickbooks?sslmode=disable
+      GOPRIVATE: github.com/CharitonMedia
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
       - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
         with:
-          go-version: "1.22"
+          go-version-file: go.mod
       - name: gofmt
         run: test -z "$(gofmt -l .)"
       - name: go vet
         run: go vet ./...
+      - name: Wait for Postgres
+        run: until pg_isready -h 127.0.0.1 -p 5432 -U togavsu; do sleep 1; done
       - name: go test
-        run: go test -count=1 ./...
+        run: go test -race -count=1 ./...
+      - name: Module check
+        run: go run github.com/CharitonMedia/togavsu/cmd/togavsu-module check package

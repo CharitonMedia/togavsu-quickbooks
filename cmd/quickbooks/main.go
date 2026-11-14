@@ -13,7 +13,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"database/sql"
-	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -29,6 +28,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	quickbooks "github.com/CharitonMedia/togavsu-quickbooks"
+	"github.com/CharitonMedia/togavsu/pkg/modulekit"
 )
 
 func main() {
@@ -98,8 +98,8 @@ func serve(args []string) {
 	}
 }
 
-// pack builds the signed package. Signing waits on a public signing package or CLI from
-// the core; until then the stub packager reports that it is unavailable.
+// pack builds and signs the package through the core's module kit and prints the
+// public key the admin adds as a trusted signing key.
 func pack(args []string) {
 	fs := flag.NewFlagSet("package", flag.ExitOnError)
 	keyFile := fs.String("key", "", "file holding a base64 ed25519 seed")
@@ -109,15 +109,17 @@ func pack(args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	seed, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
-	if err != nil || len(seed) != ed25519.SeedSize {
-		log.Fatal("the key file must hold a base64 ed25519 seed")
+	priv, err := modulekit.ParseSeed(string(raw))
+	if err != nil {
+		log.Fatal(err)
 	}
-	signed, err := quickbooks.Build(quickbooks.StubPackager{}, ed25519.NewKeyFromSeed(seed))
+	signed, err := quickbooks.Build(priv)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if err := os.WriteFile(*out, signed, 0o644); err != nil {
 		log.Fatal(err)
 	}
+	pub := priv.Public().(ed25519.PublicKey)
+	fmt.Printf("wrote %s, signed by key %s\npublic key (add it as a trusted signing key):\n%s", *out, modulekit.KeyID(pub), modulekit.PublicKeyPEM(pub))
 }

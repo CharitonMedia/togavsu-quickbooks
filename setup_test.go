@@ -57,9 +57,6 @@ func TestMODQBO01Install(t *testing.T) {
 	if schema.Valid {
 		t.Fatal("the schema exists after a cancelled install")
 	}
-	if _, err := quickbooks.Build(nil, nil); !errors.Is(err, quickbooks.ErrPackagingUnavailable) {
-		t.Fatalf("packaging: %v", err)
-	}
 }
 
 func TestMODQBO02ForeignKeys(t *testing.T) {

@@ -180,7 +180,21 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) receive(ctx context.Context, ev wire.EventPayload) error {
 	now := s.now().UnixMicro()
-	res, err := s.c.DB.ExecContext(ctx, `INSERT INTO received_events (event_id, type, record_id, received_at) VALUES ($1, $2, $3, $4) ON CONFLICT (event_id) DO NOTHING`,
+	var customers []*Row
+	if ev.Action == "contact.updated" {
+		var err error
+		if customers, err = s.store.customerRows(ctx, ev.RecordID); err != nil {
+			return err
+		}
+	}
+	// The event is recorded and its rows queued together, so an event whose queueing
+	// failed is taken again when the core redelivers it.
+	tx, err := s.c.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `INSERT INTO received_events (event_id, type, record_id, received_at) VALUES ($1, $2, $3, $4) ON CONFLICT (event_id) DO NOTHING`,
 		ev.ID, ev.Action, ev.RecordID, now)
 	if err != nil {
 		return err
@@ -191,23 +205,22 @@ func (s *Server) receive(ctx context.Context, ev wire.EventPayload) error {
 	prefix, _, _ := strings.Cut(ev.Action, ".")
 	switch {
 	case prefix == "invoice":
-		return s.store.queue(ctx, tInvoice, ev.RecordID, now)
+		err = queueOn(ctx, tx, tInvoice, ev.RecordID, now)
 	case prefix == "payment":
-		return s.store.queue(ctx, tPayment, ev.RecordID, now)
+		err = queueOn(ctx, tx, tPayment, ev.RecordID, now)
 	case prefix == "expense":
-		return s.store.queue(ctx, tExpense, ev.RecordID, now)
+		err = queueOn(ctx, tx, tExpense, ev.RecordID, now)
 	case ev.Action == "trust.entry_posted":
-		return s.store.queue(ctx, tTrust, ev.RecordID, now)
+		err = queueOn(ctx, tx, tTrust, ev.RecordID, now)
 	case ev.Action == "contact.updated":
-		rows, err := s.store.customerRows(ctx, ev.RecordID)
-		if err != nil {
-			return err
-		}
-		for _, r := range rows {
-			if err := s.store.queue(ctx, tCustomer, r.Key, now); err != nil {
-				return err
+		for _, r := range customers {
+			if err = queueOn(ctx, tx, tCustomer, r.Key, now); err != nil {
+				break
 			}
 		}
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
