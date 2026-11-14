@@ -1,78 +1,87 @@
 package quickbooks_test
 
 import (
+	"bytes"
 	"crypto/ed25519"
-	"regexp"
-	"sort"
-	"strings"
 	"testing"
 
 	quickbooks "github.com/CharitonMedia/togavsu-quickbooks"
+	"github.com/CharitonMedia/togavsu-quickbooks/internal/pendingcore"
 	"github.com/CharitonMedia/togavsu/pkg/modulekit"
 )
 
-// pendingCore maps the manifest and migration features the pinned core's install check
-// refuses to the CORE item that adds them, with the edit that removes the feature.
-var pendingCore = []struct {
-	refusal *regexp.Regexp
-	item    string
-	file    string
-	strip   *regexp.Regexp
-}{
-	{regexp.MustCompile(`unknown field "notifications"`), "CORE-03", "togavsu-module.yaml", regexp.MustCompile(`(?m)^notifications:\n(?:  .*\n)+`)},
-	{regexp.MustCompile(`unknown field "(section|icon|order|subgroup|badge)"`), "CORE-08", "togavsu-module.yaml", regexp.MustCompile(`(?m)^    (section|icon|order|subgroup|badge): .*\n`)},
-	{regexp.MustCompile(`core\.trust_accounts is not a core record`), "CORE-22", "migrations/0001_connection.sql", regexp.MustCompile(` REFERENCES core\.trust_accounts \(id\) ON DELETE RESTRICT`)},
-}
-
-// checked runs the install check on files. Each refusal a pending CORE item explains is
-// stripped and recorded, so the rest of the package is still checked and signed; any other
-// refusal fails the test.
-func checked(t *testing.T, files map[string][]byte) (map[string][]byte, []string) {
-	t.Helper()
-	files = clone(files)
-	var items []string
-	for {
-		_, _, err := modulekit.Check(files)
+// TestPendingFieldsStillRefused asserts the pinned core's install check refuses the full
+// package for each field pendingcore lists and for nothing else. It fails once the core
+// accepts a field: drop its entry then, and bring back the togavsu-module check step in CI
+// when the list's checked fields are gone.
+func TestPendingFieldsStillRefused(t *testing.T) {
+	full, err := quickbooks.Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := modulekit.ReadDir("package")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dir) != len(full) {
+		t.Fatalf("package dir has %d files, the embedded package %d", len(dir), len(full))
+	}
+	for name, b := range full {
+		if !bytes.Equal(dir[name], b) {
+			t.Fatalf("package/%s differs from the embedded copy", name)
+		}
+	}
+	checked, scopes := pendingcore.Checked()
+	for _, f := range pendingcore.Fields {
+		if !f.Present(full) {
+			t.Fatalf("%s (%s) is listed as pending but the package no longer has it", f.Name, f.Item)
+		}
+	}
+	for i, f := range checked {
+		var others []pendingcore.Field
+		others = append(others, checked[:i]...)
+		others = append(others, checked[i+1:]...)
+		_, _, err := modulekit.Check(pendingcore.Strip(full, others...))
 		if err == nil {
-			sort.Strings(items)
-			return files, items
+			t.Fatalf("the core now accepts %s: drop its %s entry from internal/pendingcore", f.Name, f.Item)
 		}
-		matched := false
-		for _, p := range pendingCore {
-			if p.refusal.MatchString(err.Error()) && p.strip.Match(files[p.file]) {
-				files[p.file] = p.strip.ReplaceAll(files[p.file], nil)
-				items = append(items, p.item)
-				matched = true
-				break
-			}
+		if !f.Refusal.MatchString(err.Error()) {
+			t.Fatalf("with only %s (%s) left, the check refused something else: %v", f.Name, f.Item, err)
 		}
-		if !matched {
-			t.Fatalf("check: %v (%s)", err, modulekit.Code(err))
-		}
+	}
+	if _, _, err := modulekit.Check(pendingcore.Strip(full, checked...)); err != nil {
+		t.Fatalf("the package minus the pending fields is refused: %v (%s)", err, modulekit.Code(err))
+	}
+	for _, f := range scopes {
+		t.Logf("%s waits for %s; the install check passes it and approval refuses it until then", f.Name, f.Item)
 	}
 }
 
-func clone(files map[string][]byte) map[string][]byte {
-	out := make(map[string][]byte, len(files))
-	for k, v := range files {
-		out[k] = append([]byte(nil), v...)
-	}
-	return out
-}
-
-// TestPackageSignsAndVerifies builds and signs the package with a throwaway key and
-// checks it the way the core does at install. While the pinned core lacks a CORE item the
-// package uses, it signs the package without that feature and skips at the end naming it.
+// TestPackageSignsAndVerifies archives, signs with a throwaway key and verifies the package
+// minus the pending fields the way the core does at install. Once the list is empty it
+// covers the shipped package itself.
 func TestPackageSignsAndVerifies(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	all, err := quickbooks.Files()
+	full, err := quickbooks.Files()
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, items := checked(t, all)
+	checked, _ := pendingcore.Checked()
+	files := pendingcore.Strip(full, checked...)
+	tar, err := modulekit.Archive(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, _, err := modulekit.CheckPackage(tar)
+	if err != nil {
+		t.Fatalf("check package: %v (%s)", err, modulekit.Code(err))
+	}
+	if pkg.Manifest.ID != quickbooks.ID {
+		t.Fatalf("manifest id %q", pkg.Manifest.ID)
+	}
 	signed, err := quickbooks.SignFile(priv, files)
 	if err != nil {
 		t.Fatal(err)
@@ -91,41 +100,13 @@ func TestPackageSignsAndVerifies(t *testing.T) {
 	if _, _, err := modulekit.VerifyFile(signed, []modulekit.TrustedKey{modulekit.Trust(other)}); err == nil {
 		t.Fatal("a package signed by an untrusted key verified")
 	}
-	if len(items) > 0 {
-		tar, err := modulekit.Archive(files)
-		if err != nil {
+	if len(checked) == 0 {
+		// The shipped package itself, as quickbooks package builds it.
+		if signed, err = quickbooks.Build(priv); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := modulekit.CheckPackage(tar); err != nil {
-			t.Fatalf("check package: %v (%s)", err, modulekit.Code(err))
+		if _, _, err := modulekit.VerifyFile(signed, []modulekit.TrustedKey{modulekit.Trust(pub)}); err != nil {
+			t.Fatalf("verify the shipped package: %v", err)
 		}
-		t.Skipf("the package as shipped needs %s; archived, signed and verified without those features", strings.Join(items, ", "))
-	}
-
-	// The package directory itself passes the install checks, read the way the CLI reads it.
-	dir, err := modulekit.ReadDir("package")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := modulekit.Check(dir); err != nil {
-		t.Fatalf("check: %v", err)
-	}
-	signed, err = quickbooks.Build(priv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := modulekit.VerifyFile(signed, []modulekit.TrustedKey{modulekit.Trust(pub)}); err != nil {
-		t.Fatalf("verify the shipped package: %v", err)
-	}
-	raw, err := quickbooks.Archive()
-	if err != nil {
-		t.Fatal(err)
-	}
-	pkg, _, err := modulekit.CheckPackage(raw)
-	if err != nil {
-		t.Fatalf("check package: %v", err)
-	}
-	if pkg.Manifest.ID != quickbooks.ID {
-		t.Fatalf("manifest id %q", pkg.Manifest.ID)
 	}
 }

@@ -3,7 +3,7 @@ module github.com/CharitonMedia/togavsu-quickbooks
 go 1.22
 
 require (
-	github.com/CharitonMedia/togavsu v0.0.0-20261114170507-e2ebff01856c
+	github.com/CharitonMedia/togavsu v0.0.0-20261114173216-817620856a6b
 	github.com/jackc/pgx/v5 v5.7.2
 )
 

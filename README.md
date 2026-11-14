@@ -69,7 +69,6 @@ viewer's context token in `X-Togavsu-Context-Token`. The OpenAPI description is 
 gofmt -l .
 go vet ./...
 go test -race ./...
-go run github.com/CharitonMedia/togavsu/cmd/togavsu-module check package
 docker build -t togavsu-quickbooks .
 ```
 
@@ -87,6 +86,12 @@ it is unset outside CI and fail in CI without it. No test reaches Intuit.
   the URL must be a superuser's. A criterion that needs a core item the pinned core lacks
   skips naming that `CORE-NN` item (see `docs/SPEC.md`, "Where this module builds"), and
   passes once the core lands it and the pin moves.
+
+The package parts the pinned core still refuses are listed once, with their CORE items, in
+`internal/pendingcore`. The package test checks and signs the package without them and
+fails when the core starts accepting one, so the entry can go. Until the list's checked
+fields are gone, `go run github.com/CharitonMedia/togavsu/cmd/togavsu-module check package`
+refuses the shipped package dir, so CI doesn't run it yet.
 
 ## Signing
 

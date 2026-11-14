@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -25,6 +24,7 @@ import (
 	"time"
 
 	quickbooks "github.com/CharitonMedia/togavsu-quickbooks"
+	"github.com/CharitonMedia/togavsu-quickbooks/internal/pendingcore"
 	"github.com/CharitonMedia/togavsu-quickbooks/qbo"
 	"github.com/CharitonMedia/togavsu-quickbooks/qbo/fake"
 	"github.com/CharitonMedia/togavsu/pkg/modulekit"
@@ -146,47 +146,38 @@ func newSuite(t *testing.T) *suite {
 // fails the test.
 func (s *suite) installable() map[string][]byte {
 	s.t.Helper()
-	files, err := quickbooks.Files()
+	full, err := quickbooks.Files()
 	if err != nil {
 		s.t.Fatal(err)
 	}
-	strip := func(name, pattern, item string) {
-		before := string(files[name])
-		after := regexp.MustCompile(pattern).ReplaceAllString(before, "")
-		if after == before {
-			s.t.Fatalf("the core refused %s for %s and stripping changed nothing", name, item)
+	// Each pending field the pinned core still refuses is stripped and its item marked
+	// missing; a field the core accepts stays, so its criteria run.
+	var strip []pendingcore.Field
+	for _, f := range pendingcore.Fields {
+		refused := false
+		if f.Scope != "" {
+			r := s.c.Admin.Do("POST", "/api/v1/api-tokens", map[string]any{"name": "scope probe", "owner_user_id": s.c.Admin.ID, "scopes": []string{f.Scope}})
+			refused = strings.Contains(r.Body, "unknown scope")
+		} else {
+			others := make([]pendingcore.Field, 0, len(pendingcore.Fields))
+			for _, o := range pendingcore.Fields {
+				if o.Refusal != nil && o.Name != f.Name {
+					others = append(others, o)
+				}
+			}
+			_, _, err := modulekit.Check(pendingcore.Strip(full, others...))
+			refused = err != nil && f.Refusal.MatchString(err.Error())
 		}
-		files[name] = []byte(after)
-		s.missing[item] = true
-	}
-	const manifest = "togavsu-module.yaml"
-	// Scopes the core's catalog doesn't know make approval fail, so probe them first.
-	for scope, item := range map[string]string{"books:read": core02, "module_secrets:write": core06} {
-		r := s.c.Admin.Do("POST", "/api/v1/api-tokens", map[string]any{"name": "scope probe", "owner_user_id": s.c.Admin.ID, "scopes": []string{scope}})
-		if strings.Contains(r.Body, "unknown scope") {
-			strip(manifest, `(?m)^  - scope: `+regexp.QuoteMeta(scope)+`\n    reason: .*\n`, item)
-		}
-	}
-	for tries := 0; ; tries++ {
-		_, _, err := modulekit.Check(files)
-		if err == nil {
-			return files
-		}
-		if tries > 5 {
-			s.t.Fatalf("the core still refuses the package: %v", err)
-		}
-		msg := err.Error()
-		switch {
-		case strings.Contains(msg, `unknown field "notifications"`):
-			strip(manifest, `(?m)^notifications:\n(?:  .*\n)+`, core03)
-		case regexp.MustCompile(`unknown field "(section|icon|order|subgroup|badge)"`).MatchString(msg):
-			strip(manifest, `(?m)^    (section|icon|order|subgroup|badge): .*\n`, core08)
-		case strings.Contains(msg, "core.trust_accounts is not a core record"):
-			strip("migrations/0001_connection.sql", ` REFERENCES core\.trust_accounts \(id\) ON DELETE RESTRICT`, core22)
-		default:
-			s.t.Fatalf("the core refuses the package: %v (%s)", err, modulekit.Code(err))
+		if refused {
+			strip = append(strip, f)
+			s.missing[f.Item] = true
 		}
 	}
+	files := pendingcore.Strip(full, strip...)
+	if _, _, err := modulekit.Check(files); err != nil {
+		s.t.Fatalf("the core refuses the package: %v (%s)", err, modulekit.Code(err))
+	}
+	return files
 }
 
 // probe marks the API items the running core lacks.
