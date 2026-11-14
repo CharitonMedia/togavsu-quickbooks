@@ -87,19 +87,47 @@ it is unset outside CI and fail in CI without it. No test reaches Intuit.
   skips naming that `CORE-NN` item (see `docs/SPEC.md`, "Where this module builds"), and
   passes once the core lands it and the pin moves.
 
-The package parts the pinned core still refuses are listed once, with their CORE items, in
-`internal/pendingcore`. The package test checks and signs the package without them and
-fails when the core starts accepting one, so the entry can go. Until the list's checked
-fields are gone, `go run github.com/CharitonMedia/togavsu/cmd/togavsu-module check package`
-refuses the shipped package dir, so CI doesn't run it yet.
+## Packaging and signing
 
-## Signing
+The package keeps every part it needs, including the ones that wait on a module-core
+change. `package/pending.yaml` lists each of those parts once, with the `CORE-NN` item it
+waits on and what it does; the kit's `modulekit.Installable` holds back each listed part
+the pinned core refuses and keeps each one it accepts, so a part comes back on its own
+when its item lands and the pin moves. At the pinned core it holds back:
 
-`quickbooks package -key signing.key -out quickbooks.signed.json` checks the package with
-`modulekit.Check`, signs it with `modulekit.Build` and prints the public key to trust.
-`signing.key` holds the Ed25519 seed the kit's `ParseSeed` reads. `quickbooks.Archive`
-gives the installable tar (`modulekit.Archive`). The manifest's container image digest is
-a placeholder that the release workflow pins.
+| Part | Waits on |
+| --- | --- |
+| manifest `notifications` (the sync problem notification) | CORE-03 |
+| manifest `sidebar[*].section`, `icon`, `order` | CORE-08 |
+| scope `books:read` | CORE-02 |
+| scope `module_secrets:write` | CORE-06 |
+| `migrations/0004_trust_bank_fk.sql` (the trust bank map's link to `core.trust_accounts`) | CORE-22 |
+
+A held-back migration is a whole file numbered after every migration that installs, so it
+is added later as a new migration and no migration a firm has run ever changes. Until
+0004 installs, the trust-bank-map action checks the trust account against the core's list
+itself, so no row can stop 0004 from adding the link.
+
+```sh
+quickbooks package -key signing.key -out quickbooks.signed.json
+# or, from the package directory alone:
+go run github.com/CharitonMedia/togavsu/cmd/togavsu-module package -installable -dir package -key signing.key -out quickbooks.signed.json
+```
+
+Both sign the installable package (`modulekit.BuildInstallable`), print one stderr line per
+held-back part with its CORE item, warn about any pending entry that holds nothing back,
+and print the public key the admin adds as a trusted signing key. `signing.key` holds the
+base64 Ed25519 seed the kit's `ParseSeed` reads; keep the release key out of the
+repository. Either refuses to sign when the core refuses a part `pending.yaml` doesn't
+list. `quickbooks.Archive` gives the installable tar. The manifest's container image digest
+is a placeholder that the release workflow pins.
+
+`TestPackageSignsAndVerifies` builds and signs with a key made at test time, verifies the
+signed file as the core does at install and checks its files have no refusals. It fails
+when the build fails with a valid key (a refusal `pending.yaml` misses), when a pending
+entry holds nothing back (drop it), and when a part is held back for anything but a field,
+scope or core table the core doesn't know yet. CI also runs
+`togavsu-module check -installable package`.
 
 ## License
 

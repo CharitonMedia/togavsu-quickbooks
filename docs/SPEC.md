@@ -149,7 +149,7 @@ Schema `mod_quickbooks`. Ids are TEXT (UUIDv7 for module rows, core ids for link
 - `connection`: `id SMALLINT PRIMARY KEY CHECK (id = 1)`, `environment TEXT` (sandbox, production), `realm_id TEXT`, `company_name TEXT`, `access_expires_at BIGINT`, `refresh_expires_at BIGINT`, `state TEXT` (disconnected, connected, reconnect_needed), `connected_by TEXT REFERENCES core.users (id) ON DELETE RESTRICT`, `connected_at BIGINT`, `first_connected_on TEXT`, `last_refresh_at BIGINT`, `last_error TEXT`. No column holds a token. The access and refresh tokens live only in the core secret store as `qbo/access_token` and `qbo/refresh_token` (section 8, item 8), so the module's database login and a backup of its schema never hold a usable token. A token secret missing from the store reads as no connection: the state becomes reconnect_needed and the admins are alerted.
 - `oauth_states`: `state TEXT PRIMARY KEY`, `user_id TEXT NOT NULL REFERENCES core.users (id) ON DELETE RESTRICT`, `redirect_uri TEXT`, `expires_at BIGINT`, `used_at BIGINT`.
 - `received_events`: `event_id TEXT PRIMARY KEY`, `type TEXT`, `record_id TEXT`, `received_at BIGINT` (private, as in matter-clock).
-- `trust_bank_map`: `trust_account_id TEXT PRIMARY KEY REFERENCES core.trust_accounts (id) ON DELETE RESTRICT`, `qbo_account TEXT NOT NULL`, `set_by TEXT REFERENCES core.users (id) ON DELETE RESTRICT`, `set_at BIGINT`.
+- `trust_bank_map`: `trust_account_id TEXT PRIMARY KEY` (its foreign key is 0004), `qbo_account TEXT NOT NULL`, `set_by TEXT REFERENCES core.users (id) ON DELETE RESTRICT`, `set_at BIGINT`. The trust-bank-map action refuses a trust account the core's `GET /api/v1/trust-accounts` doesn't list, so every row can take 0004's link.
 
 **0002_sync.sql**
 
@@ -167,6 +167,12 @@ Every sync table carries the same state columns: `realm_id`, `state` (pending, s
 **0003_views.sql**
 
 - `CREATE VIEW invoice_qbo AS SELECT invoice_id, state, synced_at FROM invoice_sync;`
+
+**0004_trust_bank_fk.sql** (waits on CORE-22; `pending.yaml` holds the whole file back until the core accepts it)
+
+- `ALTER TABLE trust_bank_map ADD CONSTRAINT trust_bank_map_trust_account_fk FOREIGN KEY (trust_account_id) REFERENCES core.trust_accounts (id) ON DELETE RESTRICT;`
+
+It is its own last file because a migration a firm has run can never change: the link arrives as a new migration in an update once the core accepts it.
 
 Indexes: `(state, next_attempt_at)` on each sync table; `(at)` and each foreign key column on `sync_log`.
 
@@ -274,7 +280,7 @@ The core today runs a module token with no context token as a principal with no 
 6. **Event delivery to a books reader (CORE-02).** `invoice.*`, `payment.*`, `expense.*` and `trust.*` events on a walled matter are dropped for a module holding `books:read`, as for any principal outside the wall. Lifting a wall sends no catch-up events; the next reconcile finds the records (section 9, Reconcile). The derived read scope rule is unchanged.
 7. **Module notification kinds and POST /api/v1/notifications (CORE-03).** The route is in the contract with no Go route today. The manifest's `notifications` list declares kind `sync_problem`, which the core names `quickbooks.sync_problem`, with default channels in_app and email, in a QuickBooks group of the notification preferences grid. NotificationWrite takes `recipient_roles` (a non-empty subset of admin and accountant) in place of `user_id`, accepted only on a service call from a module holding `notifications:write`. The core creates one notification per active user holding a named role and emails each recipient whose preference for the kind keeps email on. `link` must be a `/modules/{module_id}/` page of the calling module.
 8. **Module secret store (CORE-06).** `PUT`, `GET` and `DELETE /api/v1/modules/{module_id}/secrets/{name}` with new scope `module_secrets:write`, callable only by the module's own token. Values are sealed with the core key like secret settings, and the audit log records only the name. This module stores `qbo/client_secret`, `qbo/access_token` and `qbo/refresh_token`.
-9. **Linkable trust accounts (CORE-22).** Add `trust_account` (`trust_accounts`) to `coreRecords` in `internal/modules/manifest.go`, so `trust_bank_map`'s foreign key to `core.trust_accounts` passes the install check.
+9. **Linkable trust accounts (CORE-22).** Add `trust_account` (`trust_accounts`) to `coreRecords` in `internal/modules/manifest.go`, so migration 0004 (`trust_bank_map`'s foreign key to `core.trust_accounts`) passes the install check.
 10. **Test support (CORE-29).** The acceptance suite runs in the module's repository on `pkg/modulekit/coretest` (section 10). CORE-29 extends coretest so the money, trust, notification and secret routes this module calls are served in the test core.
 11. **Sidebar placement (CORE-08).** Manifest `sidebar` entries gain `section`, `icon` and `order`. This module's entry sits in section `money` with icon `ledger` at order 410, in place of the fixed Activity section and puzzle icon.
 12. **Frame sandbox (CORE-09).** The staff frame sandbox gains `allow-popups` and `allow-popups-to-escape-sandbox`, so the setup tab's Connect button opens Intuit's consent page in its own top-level window. Frames never get `allow-same-origin`.
@@ -389,6 +395,8 @@ modules/quickbooks/
   package/migrations/0001_connection.sql
   package/migrations/0002_sync.sql
   package/migrations/0003_views.sql
+  package/migrations/0004_trust_bank_fk.sql
+  package/pending.yaml      parts that wait on a CORE item, held back by modulekit.Installable
   *_test.go                 unit tests only
 
 internal/modules/module_quickbooks_pg_test.go   section 10 acceptance suite

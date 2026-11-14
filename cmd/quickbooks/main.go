@@ -99,8 +99,9 @@ func serve(args []string) {
 	}
 }
 
-// pack builds and signs the package through the core's module kit and prints the
-// public key the admin adds as a trusted signing key.
+// pack builds and signs the installable package through the core's module kit, names
+// each part pending.yaml held back and the CORE item it waits on, and prints the public
+// key the admin adds as a trusted signing key.
 func pack(args []string) {
 	fs := flag.NewFlagSet("package", flag.ExitOnError)
 	keyFile := fs.String("key", "", "file holding a base64 ed25519 seed")
@@ -114,9 +115,19 @@ func pack(args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	signed, err := quickbooks.Build(priv)
+	signed, held, err := quickbooks.Build(priv)
 	if err != nil {
 		log.Fatal(err)
+	}
+	for _, h := range held {
+		fmt.Fprintln(os.Stderr, h.String())
+	}
+	entries, err := quickbooks.Pending()
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, e := range modulekit.Unused(entries, held) {
+		fmt.Fprintf(os.Stderr, "pending %s (%s) holds nothing back: the core accepts it or the package no longer has it; drop its entry\n", e.Part(), e.Core)
 	}
 	if err := os.WriteFile(*out, signed, packageMode); err != nil {
 		log.Fatal(err)

@@ -22,7 +22,8 @@ var packageFS embed.FS
 //go:embed limits.json
 var limitsJSON []byte
 
-// Files returns the package files (manifest and migrations) by package path.
+// Files returns the package files (manifest, migrations and pending.yaml) by package path,
+// as written. Installable is what ships.
 func Files() (map[string][]byte, error) {
 	out := map[string][]byte{}
 	err := fs.WalkDir(packageFS, "package", func(p string, d fs.DirEntry, err error) error {
@@ -39,28 +40,39 @@ func Files() (map[string][]byte, error) {
 	return out, err
 }
 
-// Build signs the embedded package with priv into the signed package file the core
-// installs.
-func Build(priv ed25519.PrivateKey) ([]byte, error) {
+// Installable is the package the pinned core accepts: the files without pending.yaml and
+// without each part it lists that the core still refuses (modulekit.Installable). It also
+// returns the parts it held back. A refusal pending.yaml doesn't cover is an error.
+func Installable() (map[string][]byte, []modulekit.Held, error) {
+	files, err := Files()
+	if err != nil {
+		return nil, nil, err
+	}
+	return modulekit.Installable(files)
+}
+
+// Pending is the pending list (pending.yaml) as written.
+func Pending() ([]modulekit.Pending, error) {
 	files, err := Files()
 	if err != nil {
 		return nil, err
 	}
-	return SignFile(priv, files)
+	return modulekit.ParsePending(files[modulekit.PendingFile])
 }
 
-// SignFile runs the core's install checks on package files and signs them with priv,
-// through the core's module kit. It refuses to sign what the core would refuse.
-func SignFile(priv ed25519.PrivateKey, files map[string][]byte) ([]byte, error) {
-	if _, _, err := modulekit.Check(files); err != nil {
-		return nil, err
-	}
-	return modulekit.Build(priv, files)
-}
-
-// Archive is the installable package (gzip tar) of the package files.
-func Archive() ([]byte, error) {
+// Build signs the installable package with priv into the signed package file the core
+// installs (modulekit.BuildInstallable), and returns the parts it held back.
+func Build(priv ed25519.PrivateKey) ([]byte, []modulekit.Held, error) {
 	files, err := Files()
+	if err != nil {
+		return nil, nil, err
+	}
+	return modulekit.BuildInstallable(priv, files)
+}
+
+// Archive is the installable package (gzip tar), without the held-back parts.
+func Archive() ([]byte, error) {
+	files, _, err := Installable()
 	if err != nil {
 		return nil, err
 	}

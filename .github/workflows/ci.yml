@@ -37,8 +37,5 @@ jobs:
         run: until pg_isready -h 127.0.0.1 -p 5432 -U togavsu; do sleep 1; done
       - name: go test
         run: go test -race -count=1 ./...
-      # The CLI check of the shipped package dir returns when module-core lands: until then
-      # the core refuses the pending fields listed in internal/pendingcore, and
-      # TestPendingFieldsStillRefused checks the package without them. Step to restore:
-      #   - name: Module check
-      #     run: go run github.com/CharitonMedia/togavsu/cmd/togavsu-module check package
+      - name: Module check
+        run: go run github.com/CharitonMedia/togavsu/cmd/togavsu-module check -installable package

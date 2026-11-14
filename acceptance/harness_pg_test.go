@@ -4,9 +4,9 @@
 //
 // Criteria the core can't serve yet are written in full and skip at the step that needs
 // the missing core item, naming it, so the suite turns green item by item as module-core
-// lands. The suite finds what is missing itself: the install checks and scope catalog of
-// the pinned core say which package parts it refuses, and probes of the core's API say
-// which routes it lacks.
+// lands. The suite finds what is missing itself: the parts of package/pending.yaml the
+// pinned core refuses name their CORE items, and probes of the core's API say which
+// routes it lacks.
 package acceptance_test
 
 import (
@@ -24,7 +24,6 @@ import (
 	"time"
 
 	quickbooks "github.com/CharitonMedia/togavsu-quickbooks"
-	"github.com/CharitonMedia/togavsu-quickbooks/internal/pendingcore"
 	"github.com/CharitonMedia/togavsu-quickbooks/qbo"
 	"github.com/CharitonMedia/togavsu-quickbooks/qbo/fake"
 	"github.com/CharitonMedia/togavsu/pkg/modulekit"
@@ -129,7 +128,7 @@ func newSuite(t *testing.T) *suite {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.signed, err = quickbooks.SignFile(priv, s.files); err != nil {
+	if s.signed, err = modulekit.Build(priv, s.files); err != nil {
 		t.Fatal(err)
 	}
 	s.c.TrustKey("QuickBooks Sync test key", pub)
@@ -141,41 +140,18 @@ func newSuite(t *testing.T) *suite {
 	return s
 }
 
-// installable is the package as the pinned core accepts it. Each part the core refuses
-// for a missing CORE item comes out and the item is marked missing; any other refusal
-// fails the test.
+// installable is the package as the pinned core accepts it (modulekit.Installable): each
+// part pending.yaml lists that the core refuses is held back and its CORE item marked
+// missing, so the criteria that need it skip. A part the core accepts stays in, so its
+// criteria run. Any refusal pending.yaml doesn't cover fails the test.
 func (s *suite) installable() map[string][]byte {
 	s.t.Helper()
-	full, err := quickbooks.Files()
+	files, held, err := quickbooks.Installable()
 	if err != nil {
-		s.t.Fatal(err)
-	}
-	// Each pending field the pinned core still refuses is stripped and its item marked
-	// missing; a field the core accepts stays, so its criteria run.
-	var strip []pendingcore.Field
-	for _, f := range pendingcore.Fields {
-		refused := false
-		if f.Scope != "" {
-			r := s.c.Admin.Do("POST", "/api/v1/api-tokens", map[string]any{"name": "scope probe", "owner_user_id": s.c.Admin.ID, "scopes": []string{f.Scope}})
-			refused = strings.Contains(r.Body, "unknown scope")
-		} else {
-			others := make([]pendingcore.Field, 0, len(pendingcore.Fields))
-			for _, o := range pendingcore.Fields {
-				if o.Refusal != nil && o.Name != f.Name {
-					others = append(others, o)
-				}
-			}
-			_, _, err := modulekit.Check(pendingcore.Strip(full, others...))
-			refused = err != nil && f.Refusal.MatchString(err.Error())
-		}
-		if refused {
-			strip = append(strip, f)
-			s.missing[f.Item] = true
-		}
-	}
-	files := pendingcore.Strip(full, strip...)
-	if _, _, err := modulekit.Check(files); err != nil {
 		s.t.Fatalf("the core refuses the package: %v (%s)", err, modulekit.Code(err))
+	}
+	for _, h := range held {
+		s.missing[h.Pending.Core] = true
 	}
 	return files
 }

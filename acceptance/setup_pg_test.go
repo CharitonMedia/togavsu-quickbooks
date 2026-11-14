@@ -21,8 +21,14 @@ func TestMODQBO01Install(t *testing.T) {
 	if dep := s.c.Last(id); dep.Version != "1.0.0" || !s.c.SchemaExists(id) {
 		t.Fatalf("deployment %+v", dep)
 	}
-	if n := s.c.Count(`SELECT count(*) FROM core.schema_migrations WHERE owner = 'mod_quickbooks' AND version > 0`); n != 3 {
-		t.Fatalf("%d migrations recorded", n)
+	installed := 0
+	for name := range s.files {
+		if strings.HasPrefix(name, "migrations/") {
+			installed++
+		}
+	}
+	if n := s.c.Count(`SELECT count(*) FROM core.schema_migrations WHERE owner = 'mod_quickbooks' AND version > 0`); n != installed || n < 3 {
+		t.Fatalf("%d migrations recorded, the package installs %d", n, installed)
 	}
 	mod := s.c.Admin.Must(http.StatusOK, "GET", "/api/v1/modules/"+id, nil)
 	perms, _ := mod.JSON["permissions"].([]any)
