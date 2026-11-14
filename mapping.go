@@ -23,7 +23,7 @@ var markerRe = regexp.MustCompile(`Togavsu contact (\S+)`)
 func MarkerContacts(notes string) []string {
 	var out []string
 	for _, m := range markerRe.FindAllStringSubmatch(notes, -1) {
-		out = append(out, m[1])
+		out = append(out, m[firstGroup])
 	}
 	return out
 }
@@ -57,8 +57,8 @@ func BaseDisplayName(c BooksContact) string {
 // SuffixedName is the name used when a vendor or employee holds the plain one.
 func SuffixedName(base, contactID string) string {
 	short := strings.ReplaceAll(contactID, "-", "")
-	if len(short) > 8 {
-		short = short[:8]
+	if len(short) > suffixChars {
+		short = short[:suffixChars]
 	}
 	return base + " (" + short + ")"
 }
@@ -127,7 +127,7 @@ func BuildInvoice(inv Invoice, matterNumber, customerID string, r Refs) (*qbo.In
 		out.Line = append(out.Line, salesLine(l.AmountCents, l.Description, r.Items[key]))
 		sum += l.AmountCents
 	}
-	if inv.AdjustmentCents != 0 {
+	if inv.AdjustmentCents != zero64 {
 		desc := "Invoice adjustment"
 		if inv.AdjustmentNote != "" {
 			desc += ": " + inv.AdjustmentNote
@@ -135,7 +135,7 @@ func BuildInvoice(inv Invoice, matterNumber, customerID string, r Refs) (*qbo.In
 		out.Line = append(out.Line, salesLine(inv.AdjustmentCents, desc, r.Items[itemAdjustment]))
 		sum += inv.AdjustmentCents
 	}
-	if inv.InterestCents != 0 {
+	if inv.InterestCents != zero64 {
 		out.Line = append(out.Line, salesLine(inv.InterestCents, "Late interest", r.Items[itemInterest]))
 		sum += inv.InterestCents
 	}
@@ -159,7 +159,7 @@ func BuildCreditMemo(inv Invoice, customerID, date string, r Refs) *qbo.CreditMe
 // BuildWriteOffLink is the zero payment that applies the credit memo to the invoice.
 func BuildWriteOffLink(inv Invoice, customerID, date, invoiceQBO, creditMemoQBO string) *qbo.Payment {
 	amt := qbo.Money(inv.WriteOffCents)
-	return &qbo.Payment{CustomerRef: qbo.RefVal{Value: customerID}, TotalAmt: 0, TxnDate: date,
+	return &qbo.Payment{CustomerRef: qbo.RefVal{Value: customerID}, TxnDate: date,
 		Line: []qbo.Line{
 			{Amount: amt, LinkedTxn: []qbo.LinkedTxn{{TxnID: invoiceQBO, TxnType: "Invoice"}}},
 			{Amount: amt, LinkedTxn: []qbo.LinkedTxn{{TxnID: creditMemoQBO, TxnType: "CreditMemo"}}},
@@ -227,7 +227,7 @@ func TrustLines(e TrustEntry, customerID string, bank qbo.Account, linked bool, 
 	case "withdrawal", "refund":
 		return out(e.AmountCents), shapeTwo
 	case "adjustment":
-		if e.AmountCents > 0 {
+		if e.AmountCents > zero64 {
 			return in(e.AmountCents), shapeTwo
 		}
 		return out(-e.AmountCents), shapeTwo

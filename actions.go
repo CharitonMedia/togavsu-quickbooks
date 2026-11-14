@@ -80,7 +80,7 @@ func (s *Server) actRetry(ctx context.Context, v Viewer, f url.Values) (string, 
 		return "", errStatus(http.StatusConflict, "only a failed row can be retried")
 	}
 	now := s.now().UnixMicro()
-	r.State, r.Attempts, r.NextAttemptAt, r.UpdatedAt = statePending, 0, now, now
+	r.State, r.Attempts, r.NextAttemptAt, r.UpdatedAt = statePending, zero, now, now
 	if err := s.store.save(ctx, r); err != nil {
 		return "", err
 	}
@@ -103,7 +103,7 @@ func (s *Server) actRepush(ctx context.Context, v Viewer, f url.Values) (string,
 	}
 	now := s.now().UnixMicro()
 	// An empty SyncToken makes the push read the current one and send Togavsu's version.
-	r.State, r.SyncToken, r.PushedHash, r.CreditMemoTok, r.Attempts, r.NextAttemptAt, r.UpdatedAt = statePending, "", "", "", 0, now, now
+	r.State, r.SyncToken, r.PushedHash, r.CreditMemoTok, r.Attempts, r.NextAttemptAt, r.UpdatedAt = statePending, "", "", "", zero, now, now
 	if r.LastErrorCode == "drift" && strings.Contains(r.LastError, "deleted") {
 		r.QBOID = "" // deleted in QBO: create it again
 	}

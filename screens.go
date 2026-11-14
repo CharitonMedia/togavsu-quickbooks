@@ -19,12 +19,15 @@ var templateFS embed.FS
 var pages = template.Must(template.New("").Funcs(template.FuncMap{
 	"money": func(c int64) string { return qbo.Money(c).String() },
 	"when": func(us int64) string {
-		if us == 0 {
+		if us == zero64 {
 			return ""
 		}
 		return time.UnixMicro(us).UTC().Format("2006-01-02 15:04 UTC")
 	},
 }).ParseFS(templateFS, "templates/*.html"))
+
+// monthLayout is the reconciliation screen's month, YYYY-MM.
+const monthLayout = "2006-01"
 
 // dataFunc builds one screen's data for a verified viewer. The same data serves the
 // HTML page and its JSON twin under /api/.
@@ -281,8 +284,8 @@ func (s *Server) booksData(ctx context.Context, v Viewer, r *http.Request) (any,
 		}
 	}
 	out.Month = r.URL.Query().Get("month")
-	if _, err := time.Parse("2006-01", out.Month); err != nil {
-		out.Month = p.localDate(p.now)[:7]
+	if _, err := time.Parse(monthLayout, out.Month); err != nil {
+		out.Month = p.localDate(p.now)[:len(monthLayout)]
 	}
 	out.Lines, out.Togavsu, out.InQBO, err = s.bookLines(ctx, v, p, sn, rows, nil, func(date string) bool { return strings.HasPrefix(date, out.Month) })
 	return out, err
@@ -311,8 +314,8 @@ func (s *Server) bookLines(ctx context.Context, v Viewer, p *pass, sn *seen, row
 		for k, x := range q {
 			out[k] = x
 		}
-		if len(extra) == 2 {
-			out.Set(extra[0], extra[1])
+		if len(extra) == two {
+			out.Set(extra[0], extra[one])
 		}
 		return out
 	}

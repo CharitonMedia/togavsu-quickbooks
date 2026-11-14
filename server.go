@@ -61,7 +61,7 @@ func New(c Config) *Server {
 			Concurrent: limits().Concurrent, Now: c.Now}
 	}
 	return &Server{c: c, core: &core{base: c.Core, token: c.Token, hc: c.HTTP, pageLimit: limits().CorePageLimit},
-		store: &store{db: c.DB}, log: log.New(c.Log, "quickbooks ", 0)}
+		store: &store{db: c.DB}, log: log.New(c.Log, "quickbooks ", zero)}
 }
 
 func (s *Server) now() time.Time { return s.c.Now().UTC() }
@@ -199,7 +199,7 @@ func (s *Server) receive(ctx context.Context, ev wire.EventPayload) error {
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if n, _ := res.RowsAffected(); n == zero64 {
 		return nil // delivered before
 	}
 	prefix, _, _ := strings.Cut(ev.Action, ".")

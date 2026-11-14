@@ -23,7 +23,7 @@ const (
 
 // SignWebhook signs an event body. The module only verifies; the fake core in tests signs.
 func SignWebhook(secret string, at time.Time, body []byte) string {
-	t := strconv.FormatInt(at.Unix(), 10)
+	t := strconv.FormatInt(at.Unix(), decimal)
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(t + "."))
 	mac.Write(body)

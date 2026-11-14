@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,12 +18,6 @@ import (
 	"time"
 
 	"github.com/CharitonMedia/togavsu-quickbooks/qbo"
-)
-
-// Lifetimes of issued tokens on the fake's clock.
-const (
-	AccessLifetime  = time.Hour
-	RefreshLifetime = 100 * 24 * time.Hour
 )
 
 // SandboxBase and ProductionBase are the addresses BaseURL reports, matching Intuit's.
@@ -154,7 +149,7 @@ func SampleChart() SeedData {
 func (f *Fake) Seed(realm string, d SeedData) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	c := &company{name: d.Name, others: map[string]string{}, entities: map[qbo.Kind]map[string]*stored{}, nextID: 1000, replays: map[string]replay{}}
+	c := &company{name: d.Name, others: map[string]string{}, entities: map[qbo.Kind]map[string]*stored{}, nextID: firstEntityID, replays: map[string]replay{}}
 	for _, a := range d.Accounts {
 		if a.FullyQualifiedName == "" {
 			a.FullyQualifiedName = a.Name
@@ -418,11 +413,11 @@ func (a *auth) Exchange(_ context.Context, code, redirectURI string) (qbo.Tokens
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if a.id == "" || a.secret == "" {
-		return qbo.Tokens{}, &qbo.Fault{HTTPStatus: 401, Code: "invalid_client", Message: "client id and secret are required"}
+		return qbo.Tokens{}, &qbo.Fault{HTTPStatus: http.StatusUnauthorized, Code: "invalid_client", Message: "client id and secret are required"}
 	}
 	realm, ok := f.codes[code]
 	if !ok {
-		return qbo.Tokens{}, &qbo.Fault{HTTPStatus: 400, Code: qbo.CodeInvalidGrant, Message: "unknown or used code"}
+		return qbo.Tokens{}, &qbo.Fault{HTTPStatus: http.StatusBadRequest, Code: qbo.CodeInvalidGrant, Message: "unknown or used code"}
 	}
 	delete(f.codes, code)
 	f.Exchanged = append(f.Exchanged, a.id+" "+redirectURI)
@@ -436,7 +431,7 @@ func (a *auth) Refresh(_ context.Context, refreshToken string) (qbo.Tokens, erro
 	t := f.refresh[refreshToken]
 	if f.revokeRef || t == nil || t.revoked {
 		f.revokeRef = false
-		return qbo.Tokens{}, &qbo.Fault{HTTPStatus: 400, Code: qbo.CodeInvalidGrant, Message: "the refresh token is invalid"}
+		return qbo.Tokens{}, &qbo.Fault{HTTPStatus: http.StatusBadRequest, Code: qbo.CodeInvalidGrant, Message: "the refresh token is invalid"}
 	}
 	t.revoked = true // rotated on every refresh
 	return f.issue(t.realm), nil
@@ -477,7 +472,7 @@ func (f *Fake) Open(conn qbo.Conn, ts qbo.TokenSource) qbo.Books {
 
 // errNotFound is a 610.
 func errNotFound(k qbo.Kind, id string) error {
-	return &qbo.Fault{HTTPStatus: 400, Code: qbo.CodeNotFound, Message: "Object Not Found: " + string(k) + " " + id}
+	return &qbo.Fault{HTTPStatus: http.StatusBadRequest, Code: qbo.CodeNotFound, Message: "Object Not Found: " + string(k) + " " + id}
 }
 
 // begin authorizes one call the way the HTTP adapter does: a 401 refreshes once.
@@ -491,7 +486,7 @@ func (b *books) begin(ctx context.Context, op string, k qbo.Kind, id, requestID 
 			return nil, err
 		}
 		if !b.f.AccessValid(tok) {
-			return nil, &qbo.Fault{HTTPStatus: 401, Code: qbo.CodeUnauthorized, Message: "AuthenticationFailed"}
+			return nil, &qbo.Fault{HTTPStatus: http.StatusUnauthorized, Code: qbo.CodeUnauthorized, Message: "AuthenticationFailed"}
 		}
 	}
 	b.f.mu.Lock()
@@ -501,13 +496,13 @@ func (b *books) begin(ctx context.Context, op string, k qbo.Kind, id, requestID 
 	if t.realm != b.conn.RealmID || c == nil {
 		b.f.calls = append(b.f.calls, call)
 		b.f.mu.Unlock()
-		return nil, &qbo.Fault{HTTPStatus: 403, Code: "403", Message: "token is for another company"}
+		return nil, &qbo.Fault{HTTPStatus: http.StatusForbidden, Code: "403", Message: "token is for another company"}
 	}
-	if b.f.throttle > 0 {
+	if b.f.throttle > zero {
 		b.f.throttle--
 		b.f.calls = append(b.f.calls, call)
 		b.f.mu.Unlock()
-		return nil, &qbo.Fault{HTTPStatus: 429, Code: "429", Message: "ThrottleExceeded", Retryable: true}
+		return nil, &qbo.Fault{HTTPStatus: http.StatusTooManyRequests, Code: "429", Message: "ThrottleExceeded", Retryable: true}
 	}
 	if requestID != "" {
 		if _, ok := c.replays[requestID]; ok {
@@ -529,7 +524,7 @@ func (b *books) write(ctx context.Context, op string, e qbo.Entity, k qbo.Kind, 
 		return r.ref, r.err
 	}
 	if q := b.f.failNext[k]; len(q) > 0 {
-		b.f.failNext[k] = q[1:]
+		b.f.failNext[k] = q[one:]
 		return qbo.Ref{}, q[0]
 	}
 	ref, err := apply(c)
@@ -539,7 +534,7 @@ func (b *books) write(ctx context.Context, op string, e qbo.Entity, k qbo.Kind, 
 			c.replays[requestID] = replay{ref: ref, err: err}
 		}
 	}
-	if err == nil && b.f.timeout[k] > 0 {
+	if err == nil && b.f.timeout[k] > zero {
 		b.f.timeout[k]--
 		return qbo.Ref{}, &qbo.Fault{Code: qbo.CodeNetwork, Message: "timeout waiting for QuickBooks", Retryable: true}
 	}
@@ -620,7 +615,7 @@ func (c *company) item(id string) *qbo.Item {
 }
 
 func businessFault(msg string) error {
-	return &qbo.Fault{HTTPStatus: 400, Code: qbo.CodeBusinessRule, Message: "A business validation error has occurred: " + msg}
+	return &qbo.Fault{HTTPStatus: http.StatusBadRequest, Code: qbo.CodeBusinessRule, Message: "A business validation error has occurred: " + msg}
 }
 
 // validate applies the per-kind rules before a create or update lands.
@@ -628,14 +623,14 @@ func (c *company) validate(e qbo.Entity, selfID string) error {
 	switch v := e.(type) {
 	case *qbo.Customer:
 		if v.DisplayName == "" || strings.Contains(v.DisplayName, ":") {
-			return &qbo.Fault{HTTPStatus: 400, Code: "6000", Message: "DisplayName is required and can't hold a colon"}
+			return &qbo.Fault{HTTPStatus: http.StatusBadRequest, Code: "6000", Message: "DisplayName is required and can't hold a colon"}
 		}
 		if _, taken := c.others[v.DisplayName]; taken {
-			return &qbo.Fault{HTTPStatus: 400, Code: qbo.CodeDuplicateName, Message: "Duplicate Name Exists Error: the name supplied already exists"}
+			return &qbo.Fault{HTTPStatus: http.StatusBadRequest, Code: qbo.CodeDuplicateName, Message: "Duplicate Name Exists Error: the name supplied already exists"}
 		}
 		for id, s := range c.entities[qbo.KindCustomer] {
 			if id != selfID && !s.deleted && s.entity().(*qbo.Customer).DisplayName == v.DisplayName {
-				return &qbo.Fault{HTTPStatus: 400, Code: qbo.CodeDuplicateName, Message: "Duplicate Name Exists Error: the name supplied already exists"}
+				return &qbo.Fault{HTTPStatus: http.StatusBadRequest, Code: qbo.CodeDuplicateName, Message: "Duplicate Name Exists Error: the name supplied already exists"}
 			}
 		}
 	case *qbo.Invoice:
@@ -689,7 +684,7 @@ func (c *company) validate(e qbo.Entity, selfID string) error {
 				return businessFault("posting type is Debit or Credit")
 			}
 		}
-		if dr != cr || len(v.Line) < 2 {
+		if dr != cr || len(v.Line) < minJournalLines {
 			return businessFault("Transaction must be balanced")
 		}
 	case *qbo.Purchase:
@@ -728,7 +723,7 @@ func (b *books) Update(ctx context.Context, e qbo.Entity, requestID string) (qbo
 			return qbo.Ref{}, errNotFound(e.Kind(), r.ID)
 		}
 		if r.SyncToken != strconv.Itoa(s.syncToken) {
-			return qbo.Ref{}, &qbo.Fault{HTTPStatus: 400, Code: qbo.CodeStaleToken, Message: "Stale Object Error: You and someone else are working on the same object"}
+			return qbo.Ref{}, &qbo.Fault{HTTPStatus: http.StatusBadRequest, Code: qbo.CodeStaleToken, Message: "Stale Object Error: You and someone else are working on the same object"}
 		}
 		if s.voided {
 			return qbo.Ref{}, businessFault("a voided transaction can't change")
@@ -760,7 +755,7 @@ func (b *books) Void(ctx context.Context, k qbo.Kind, ref qbo.Ref, requestID str
 			return qbo.Ref{}, errNotFound(k, ref.ID)
 		}
 		if ref.SyncToken != strconv.Itoa(s.syncToken) {
-			return qbo.Ref{}, &qbo.Fault{HTTPStatus: 400, Code: qbo.CodeStaleToken, Message: "Stale Object Error"}
+			return qbo.Ref{}, &qbo.Fault{HTTPStatus: http.StatusBadRequest, Code: qbo.CodeStaleToken, Message: "Stale Object Error"}
 		}
 		if k == qbo.KindInvoice {
 			// QBO refuses to void an invoice that live payments are applied to.
@@ -770,7 +765,7 @@ func (b *books) Void(ctx context.Context, k qbo.Kind, ref qbo.Ref, requestID str
 				}
 				for _, l := range ps.entity().(*qbo.Payment).Line {
 					for _, lt := range l.LinkedTxn {
-						if lt.TxnType == "Invoice" && lt.TxnID == ref.ID && l.Amount != 0 {
+						if lt.TxnType == "Invoice" && lt.TxnID == ref.ID && l.Amount != qbo.Money(zero) {
 							return qbo.Ref{}, businessFault("the invoice has payments applied")
 						}
 					}
@@ -782,11 +777,11 @@ func (b *books) Void(ctx context.Context, k qbo.Kind, ref qbo.Ref, requestID str
 		_ = json.Unmarshal(s.body, &m)
 		if lines, ok := m["Line"].([]any); ok {
 			for _, l := range lines {
-				l.(map[string]any)["Amount"] = 0
+				l.(map[string]any)["Amount"] = zero
 			}
 		}
 		if _, ok := m["TotalAmt"]; ok {
-			m["TotalAmt"] = 0
+			m["TotalAmt"] = zero
 		}
 		m["PrivateNote"] = fmt.Sprint(m["PrivateNote"]) + " Voided"
 		s.body = mustJSON(m)
@@ -804,7 +799,7 @@ func (b *books) Delete(ctx context.Context, k qbo.Kind, ref qbo.Ref, requestID s
 			return qbo.Ref{}, errNotFound(k, ref.ID)
 		}
 		if ref.SyncToken != strconv.Itoa(s.syncToken) {
-			return qbo.Ref{}, &qbo.Fault{HTTPStatus: 400, Code: qbo.CodeStaleToken, Message: "Stale Object Error"}
+			return qbo.Ref{}, &qbo.Fault{HTTPStatus: http.StatusBadRequest, Code: qbo.CodeStaleToken, Message: "Stale Object Error"}
 		}
 		s.deleted = true
 		s.syncToken++
@@ -863,7 +858,7 @@ func (c *company) applied(txnType, id string) qbo.Money {
 func (f *Fake) InvoiceBalance(realm, id string) qbo.Money {
 	e := f.Get(realm, qbo.KindInvoice, id)
 	if e == nil {
-		return 0
+		return qbo.Money(zero)
 	}
 	return *e.(*qbo.Invoice).Balance
 }
@@ -914,7 +909,7 @@ func (b *books) CreateAccount(ctx context.Context, a qbo.Account, requestID stri
 	return b.write(ctx, "create_account", nil, "Account", "", requestID, func(c *company) (qbo.Ref, error) {
 		for _, x := range c.accounts {
 			if x.Name == a.Name {
-				return qbo.Ref{}, &qbo.Fault{HTTPStatus: 400, Code: qbo.CodeDuplicateName, Message: "Duplicate Name Exists Error"}
+				return qbo.Ref{}, &qbo.Fault{HTTPStatus: http.StatusBadRequest, Code: qbo.CodeDuplicateName, Message: "Duplicate Name Exists Error"}
 			}
 		}
 		a.ID, a.FullyQualifiedName, a.Active = c.newID(), a.Name, true
@@ -927,7 +922,7 @@ func (b *books) CreateItem(ctx context.Context, i qbo.Item, requestID string) (q
 	return b.write(ctx, "create_item", nil, "Item", "", requestID, func(c *company) (qbo.Ref, error) {
 		for _, x := range c.items {
 			if x.Name == i.Name {
-				return qbo.Ref{}, &qbo.Fault{HTTPStatus: 400, Code: qbo.CodeDuplicateName, Message: "Duplicate Name Exists Error"}
+				return qbo.Ref{}, &qbo.Fault{HTTPStatus: http.StatusBadRequest, Code: qbo.CodeDuplicateName, Message: "Duplicate Name Exists Error"}
 			}
 		}
 		if i.IncomeAccountRef == nil || c.account(i.IncomeAccountRef.Value) == nil {

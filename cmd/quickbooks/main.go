@@ -32,18 +32,19 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
+	args := os.Args[one:]
+	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: quickbooks serve|package [flags]")
-		os.Exit(2)
+		os.Exit(usageExit)
 	}
-	switch os.Args[1] {
+	switch args[0] {
 	case "serve":
-		serve(os.Args[2:])
+		serve(args[one:])
 	case "package":
-		pack(os.Args[2:])
+		pack(args[one:])
 	default:
 		fmt.Fprintln(os.Stderr, "usage: quickbooks serve|package [flags]")
-		os.Exit(2)
+		os.Exit(usageExit)
 	}
 }
 
@@ -117,7 +118,7 @@ func pack(args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := os.WriteFile(*out, signed, 0o644); err != nil {
+	if err := os.WriteFile(*out, signed, packageMode); err != nil {
 		log.Fatal(err)
 	}
 	pub := priv.Public().(ed25519.PublicKey)

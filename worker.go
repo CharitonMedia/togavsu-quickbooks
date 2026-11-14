@@ -296,7 +296,7 @@ func (s *Server) Tick(ctx context.Context) error {
 // pushDue pushes every pending row whose time has come.
 func (s *Server) pushDue(ctx context.Context) error {
 	var n int
-	if err := s.c.DB.QueryRowContext(ctx, dueCount(), s.now().UnixMicro()).Scan(&n); err != nil || n == 0 {
+	if err := s.c.DB.QueryRowContext(ctx, dueCount(), s.now().UnixMicro()).Scan(&n); err != nil || n == zero {
 		return err
 	}
 	p, err := s.newPass(ctx, true)
@@ -415,7 +415,7 @@ func (p *pass) finish(ctx context.Context, r *Row, err error) error {
 	logged := logEntry{}
 	switch {
 	case err == nil:
-		r.State, r.WaitingOn, r.Attempts, r.RequestID = stateSynced, "", 0, ""
+		r.State, r.WaitingOn, r.Attempts, r.RequestID = stateSynced, "", zero, ""
 		if !p.wrote && r.SkipReason == stateAcknowledged {
 			r.State = stateAcknowledged
 		}
@@ -432,9 +432,9 @@ func (p *pass) finish(ctx context.Context, r *Row, err error) error {
 		if r.State != stateSkipped || r.SkipReason != se.reason {
 			logged = logEntry{Op: "skip", Outcome: "ok", Message: se.reason}
 		}
-		r.State, r.SkipReason, r.WaitingOn, r.Attempts = stateSkipped, se.reason, "", 0
+		r.State, r.SkipReason, r.WaitingOn, r.Attempts = stateSkipped, se.reason, "", zero
 	case errors.Is(err, errHidden) || isNotFound(err):
-		r.State, r.WaitingOn, r.Attempts, r.LastErrorCode, r.LastError = stateHidden, "", 0, "", ""
+		r.State, r.WaitingOn, r.Attempts, r.LastErrorCode, r.LastError = stateHidden, "", zero, "", ""
 	case errors.As(err, &fe):
 		r.State, r.WaitingOn, r.LastErrorCode, r.LastError = stateFailed, "", fe.code, fe.msg
 		logged = logEntry{Op: "skip", Outcome: "failed", FaultCode: fe.code, Message: fe.msg}
@@ -741,7 +741,7 @@ func (p *pass) paymentsOn(ctx context.Context, inv Invoice) (int64, error) {
 
 // writeOff posts or raises the credit memo and the zero payment applying it.
 func (p *pass) writeOff(ctx context.Context, r *Row, inv Invoice, cust string) error {
-	if inv.WriteOffCents <= 0 || inv.WriteOffCents == r.WriteOffCents && r.WriteOffLinkID != "" {
+	if inv.WriteOffCents <= zero64 || inv.WriteOffCents == r.WriteOffCents && r.WriteOffLinkID != "" {
 		return nil
 	}
 	date := p.localDate(p.now)
@@ -848,7 +848,7 @@ func (p *pass) voidInvoice(ctx context.Context, r *Row, inv Invoice) error {
 		if err := p.remove(ctx, r, qbo.KindCreditMemo, r.CreditMemoID); err != nil {
 			return err
 		}
-		r.CreditMemoID, r.CreditMemoTok, r.WriteOffCents = "", "", 0
+		r.CreditMemoID, r.CreditMemoTok, r.WriteOffCents = "", "", zero64
 		if err := p.s.store.save(ctx, r); err != nil {
 			return err
 		}
@@ -896,7 +896,7 @@ func (p *pass) pushPayment(ctx context.Context, r *Row, pm Payment) error {
 	if pm.Status != "completed" {
 		return &skipErr{reason: "a " + pm.Status + " payment never syncs"}
 	}
-	if pm.AmountCents <= 0 {
+	if pm.AmountCents <= zero64 {
 		return &skipErr{reason: "zero amount"}
 	}
 	date := p.localDate(pm.CreatedAt)
@@ -1029,7 +1029,7 @@ func (p *pass) pushTrust(ctx context.Context, r *Row) error {
 	if err != nil {
 		return err
 	}
-	if e.AmountCents == 0 {
+	if e.AmountCents == zero64 {
 		return &skipErr{reason: "zero amount"}
 	}
 	date := p.localDate(e.CreatedAt)
