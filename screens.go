@@ -95,8 +95,8 @@ var (
 type Counts struct {
 	SyncedToday int `json:"synced_today"`
 	Synced      int `json:"synced"`
-	Pending    int `json:"pending"`
-	Exceptions int `json:"exceptions"`
+	Pending     int `json:"pending"`
+	Exceptions  int `json:"exceptions"`
 }
 
 // visibleRows reads the module's rows and keeps those whose records the books reader
