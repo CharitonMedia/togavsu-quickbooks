@@ -137,8 +137,8 @@ func (a *httpAuth) tokenCall(ctx context.Context, form url.Values) (Tokens, erro
 	}
 	now := a.now()
 	return Tokens{AccessToken: tr.AccessToken, RefreshToken: tr.RefreshToken,
-		AccessExpiresAt:  now.Add(time.Duration(tr.ExpiresIn) * time.Second),
-		RefreshExpiresAt: now.Add(time.Duration(tr.RefreshIn) * time.Second)}, nil
+		AccessExpiresAt:  now.Add(time.Duration(tr.ExpiresIn) * second),
+		RefreshExpiresAt: now.Add(time.Duration(tr.RefreshIn) * second)}, nil
 }
 
 func (a *httpAuth) Exchange(ctx context.Context, code, redirectURI string) (Tokens, error) {
@@ -211,13 +211,13 @@ func (b *httpBooks) call(ctx context.Context, method, path string, q url.Values,
 		if err != nil {
 			return &Fault{Code: CodeNetwork, Message: "QuickBooks did not answer", Retryable: true}
 		}
-		if status == http.StatusUnauthorized && attempt == 0 {
+		if status == http.StatusUnauthorized && attempt == zero {
 			if tok, err = b.ts.Refresh(ctx); err != nil {
 				return err
 			}
 			continue
 		}
-		if status >= 200 && status < 300 {
+		if status >= http.StatusOK && status < http.StatusMultipleChoices {
 			if out == nil {
 				return nil
 			}
@@ -348,13 +348,10 @@ func (b *httpBooks) Company(ctx context.Context) (Company, error) {
 	return Company{RealmID: b.realm, Name: ci.CompanyName}, nil
 }
 
-// pageSize is QBO's largest query page.
-const pageSize = 1000
-
 // query runs a QBO SQL query, page by page, appending each page's entity list to out.
 func query[T any](ctx context.Context, b *httpBooks, entity, where string) ([]T, error) {
 	var out []T
-	for start := 1; ; start += pageSize {
+	for start := firstPosition; ; start += pageSize {
 		q := fmt.Sprintf("select * from %s%s startposition %d maxresults %d", entity, where, start, pageSize)
 		var raw struct {
 			QueryResponse map[string]json.RawMessage `json:"QueryResponse"`
@@ -489,7 +486,7 @@ func (l *Limiter) Acquire(ctx context.Context) (func(), error) {
 	for {
 		l.mu.Lock()
 		now := l.now()
-		cut := now.Add(-time.Minute)
+		cut := now.Add(-rateWindow)
 		keep := l.stamps[:0]
 		for _, s := range l.stamps {
 			if s.After(cut) {
@@ -502,7 +499,7 @@ func (l *Limiter) Acquire(ctx context.Context) (func(), error) {
 			l.mu.Unlock()
 			break
 		}
-		wait := l.stamps[0].Add(time.Minute).Sub(now)
+		wait := l.stamps[0].Add(rateWindow).Sub(now)
 		l.Waits++
 		l.mu.Unlock()
 		if err := l.sleep(ctx, wait); err != nil {

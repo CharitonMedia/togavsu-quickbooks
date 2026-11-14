@@ -202,6 +202,16 @@ func (st *store) save(ctx context.Context, r *Row) error {
 // queue marks a record's row pending and due now, creating it if needed. A new event on
 // a failed row resets its attempts. A drift row stays drift until a person decides.
 func (st *store) queue(ctx context.Context, t *table, key string, now int64) error {
+	return queueOn(ctx, st.db, t, key, now)
+}
+
+// execer is a database or a transaction.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// queueOn marks a record due for a push, on db or inside a transaction.
+func queueOn(ctx context.Context, db execer, t *table, key string, now int64) error {
 	set := `
   state = CASE WHEN ` + t.Name + `.state = 'drift' THEN 'drift' ELSE 'pending' END,
   skip_reason = CASE WHEN ` + t.Name + `.state = 'acknowledged' THEN 'acknowledged' ELSE '' END,
@@ -209,10 +219,10 @@ func (st *store) queue(ctx context.Context, t *table, key string, now int64) err
   next_attempt_at = $2, updated_at = $2`
 	if t == tCustomer {
 		// a customer row is made with its contact by newCustomerRow; here it only requeues
-		_, err := st.db.ExecContext(ctx, `UPDATE customer_sync SET`+set+` WHERE id = $1`, key, now)
+		_, err := db.ExecContext(ctx, `UPDATE customer_sync SET`+set+` WHERE id = $1`, key, now)
 		return err
 	}
-	_, err := st.db.ExecContext(ctx, `INSERT INTO `+t.Name+` (`+t.Key+`, state, next_attempt_at, updated_at) VALUES ($1, 'pending', $2, $2)
+	_, err := db.ExecContext(ctx, `INSERT INTO `+t.Name+` (`+t.Key+`, state, next_attempt_at, updated_at) VALUES ($1, 'pending', $2, $2)
 ON CONFLICT (`+t.Key+`) DO UPDATE SET`+set, key, now)
 	return err
 }
@@ -326,32 +336,46 @@ func newUUIDv7(at time.Time) string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	ms := uint64(at.UnixMilli())
-	binary.BigEndian.PutUint16(b[0:2], uint16(ms>>32))
-	binary.BigEndian.PutUint32(b[2:6], uint32(ms))
-	b[6] = (b[6] & 0x0f) | 0x70
-	b[8] = (b[8] & 0x3f) | 0x80
+	binary.BigEndian.PutUint16(b[:uuidMillisHigh], uint16(ms>>32))
+	binary.BigEndian.PutUint32(b[uuidMillisHigh:uuidMillisEnd], uint32(ms))
+	b[uuidVersionByte] = (b[uuidVersionByte] & 0x0f) | 0x70
+	b[uuidVariantByte] = (b[uuidVariantByte] & 0x3f) | 0x80
 	return formatUUID(b)
 }
 
-// requestNamespace is the UUIDv5 namespace of QBO request ids.
-var requestNamespace = [16]byte{0x6b, 0xa7, 0xb8, 0x10, 0x9d, 0xad, 0x11, 0xd1, 0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30, 0xc8}
+// requestNamespace is the UUIDv5 namespace of QBO request ids (RFC 9562's DNS namespace).
+var requestNamespace = func() []byte {
+	b, err := hex.DecodeString(strings.ReplaceAll("6ba7b810-9dad-11d1-80b4-00c04fd430c8", "-", ""))
+	if err != nil {
+		panic(err)
+	}
+	return b
+}()
 
 // RequestID is the UUIDv5 of the record id, operation and payload hash: 36 characters,
 // under Intuit's 50, and the same for the same write.
 func RequestID(recordID, op, hash string) string {
 	h := sha1.New()
-	h.Write(requestNamespace[:])
+	h.Write(requestNamespace)
 	h.Write([]byte(recordID + "|" + op + "|" + hash))
 	var b [16]byte
 	copy(b[:], h.Sum(nil))
-	b[6] = (b[6] & 0x0f) | 0x50
-	b[8] = (b[8] & 0x3f) | 0x80
+	b[uuidVersionByte] = (b[uuidVersionByte] & 0x0f) | 0x50
+	b[uuidVariantByte] = (b[uuidVariantByte] & 0x3f) | 0x80
 	return formatUUID(b)
 }
 
 func formatUUID(b [16]byte) string {
 	s := hex.EncodeToString(b[:])
-	return s[0:8] + "-" + s[8:12] + "-" + s[12:16] + "-" + s[16:20] + "-" + s[20:]
+	var out strings.Builder
+	from := zero
+	for _, at := range uuidDashes {
+		out.WriteString(s[from:at])
+		out.WriteByte('-')
+		from = at
+	}
+	out.WriteString(s[from:])
+	return out.String()
 }
 
 func randomToken() string {

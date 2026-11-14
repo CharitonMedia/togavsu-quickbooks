@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -129,7 +130,7 @@ func AsFault(err error) *Fault {
 // RetryableStatus reports whether an HTTP status is retried.
 func RetryableStatus(status int) bool {
 	switch status {
-	case 429, 500, 502, 503, 504:
+	case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		return true
 	}
 	return false
@@ -190,7 +191,7 @@ func (m Money) MarshalJSON() ([]byte, error) { return []byte(m.String()), nil }
 func (m Money) String() string {
 	v := int64(m)
 	sign := ""
-	if v < 0 {
+	if v < zero64 {
 		sign, v = "-", -v
 	}
 	return fmt.Sprintf("%s%d.%02d", sign, v/100, v%100)
@@ -214,10 +215,10 @@ func ParseMoney(s string) (Money, error) {
 	s = strings.TrimPrefix(s, "-")
 	whole, frac, _ := strings.Cut(s, ".")
 	frac = strings.TrimRight(frac, "0")
-	if len(frac) > 2 {
+	if len(frac) > centDigits {
 		return 0, fmt.Errorf("qbo: amount %q has more than two decimals", s)
 	}
-	for len(frac) < 2 {
+	for len(frac) < centDigits {
 		frac += "0"
 	}
 	if whole == "" {

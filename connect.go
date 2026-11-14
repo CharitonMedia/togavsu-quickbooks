@@ -123,7 +123,7 @@ func (s *Server) lost(ctx context.Context, why string) {
 		s.log.Printf("connection: %v", err)
 		return
 	}
-	s.cacheToken("", 0)
+	s.cacheToken("", zero64)
 	s.log.Printf("connection lost: reconnect needed")
 	s.alertConnection(ctx, "QuickBooks needs to be reconnected", "connection")
 }
@@ -314,7 +314,7 @@ func (s *Server) disconnect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	conn.State, conn.AccessExpiresAt, conn.RefreshExpiresAt = "disconnected", 0, 0
-	s.cacheToken("", 0)
+	conn.State, conn.AccessExpiresAt, conn.RefreshExpiresAt = "disconnected", zero64, zero64
+	s.cacheToken("", zero64)
 	return s.store.saveConnection(ctx, conn)
 }

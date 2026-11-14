@@ -1,0 +1,25 @@
+# Parts of this package that wait on a module-core change (CORE-CHANGES.md). The package
+# keeps them where they belong; modulekit.BuildInstallable (quickbooks package) holds back
+# each one the pinned core refuses, and each returns on its own once the core accepts it.
+pending:
+  - field: notifications
+    core: CORE-03
+    reason: Declares the sync_problem notification that tells admins and accountants an item failed to sync.
+  - field: sidebar[*].section
+    core: CORE-08
+    reason: Files the QuickBooks sidebar entry under Money.
+  - field: sidebar[*].icon
+    core: CORE-08
+    reason: Gives the QuickBooks sidebar entry its ledger icon.
+  - field: sidebar[*].order
+    core: CORE-08
+    reason: Places the QuickBooks sidebar entry within the Money section.
+  - scope: books:read
+    core: CORE-02
+    reason: Reads the firm's money records without a viewer, for the background sync and the nightly reconcile.
+  - scope: module_secrets:write
+    core: CORE-06
+    reason: Keeps the QuickBooks client secret and sign-in tokens in the core's sealed secret store.
+  - migration: migrations/0004_trust_bank_fk.sql
+    core: CORE-22
+    reason: Links each trust bank mapping to its Togavsu trust account.

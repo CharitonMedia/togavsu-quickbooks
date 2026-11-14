@@ -80,7 +80,7 @@ func (s *Server) actRetry(ctx context.Context, v Viewer, f url.Values) (string, 
 		return "", errStatus(http.StatusConflict, "only a failed row can be retried")
 	}
 	now := s.now().UnixMicro()
-	r.State, r.Attempts, r.NextAttemptAt, r.UpdatedAt = statePending, 0, now, now
+	r.State, r.Attempts, r.NextAttemptAt, r.UpdatedAt = statePending, zero, now, now
 	if err := s.store.save(ctx, r); err != nil {
 		return "", err
 	}
@@ -103,7 +103,7 @@ func (s *Server) actRepush(ctx context.Context, v Viewer, f url.Values) (string,
 	}
 	now := s.now().UnixMicro()
 	// An empty SyncToken makes the push read the current one and send Togavsu's version.
-	r.State, r.SyncToken, r.PushedHash, r.CreditMemoTok, r.Attempts, r.NextAttemptAt, r.UpdatedAt = statePending, "", "", "", 0, now, now
+	r.State, r.SyncToken, r.PushedHash, r.CreditMemoTok, r.Attempts, r.NextAttemptAt, r.UpdatedAt = statePending, "", "", "", zero, now, now
 	if r.LastErrorCode == "drift" && strings.Contains(r.LastError, "deleted") {
 		r.QBOID = "" // deleted in QBO: create it again
 	}
@@ -162,7 +162,21 @@ func (s *Server) actTrustBankMap(ctx context.Context, v Viewer, f url.Values) (s
 		_, err := s.c.DB.ExecContext(ctx, `DELETE FROM trust_bank_map WHERE trust_account_id = $1`, id)
 		return "Cleared.", err
 	}
-	_, err := s.c.DB.ExecContext(ctx, `INSERT INTO trust_bank_map (trust_account_id, qbo_account, set_by, set_at) VALUES ($1, $2, $3, $4)
+	// The link to core.trust_accounts waits on CORE-22 (migration 0004), so check the
+	// account against the core's list too: no row may name an account the core lacks, or
+	// that migration could not add the link once it installs.
+	accts, err := listAll[TrustAccount](ctx, s.core, "/api/v1/trust-accounts", nil, v.Token)
+	if err != nil {
+		return "", err
+	}
+	known := false
+	for _, a := range accts {
+		known = known || a.ID == id
+	}
+	if !known {
+		return "", errStatus(http.StatusBadRequest, "that trust account is not in Togavsu")
+	}
+	_, err = s.c.DB.ExecContext(ctx, `INSERT INTO trust_bank_map (trust_account_id, qbo_account, set_by, set_at) VALUES ($1, $2, $3, $4)
 ON CONFLICT (trust_account_id) DO UPDATE SET qbo_account = $2, set_by = $3, set_at = $4`, id, val, v.UserID, s.now().UnixMicro())
 	if err != nil {
 		return "", errStatus(http.StatusBadRequest, "that trust account is not in Togavsu")

@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -115,7 +116,7 @@ func DefaultSettings() map[string]string {
 
 // New starts a fake core on 127.0.0.1. db is an admin connection to the test database.
 func New(db *sql.DB, now func() time.Time) *Core {
-	c := &Core{DB: db, Now: now, Token: "mod_" + randHex(16), WebhookSecret: "whsec_" + randHex(16),
+	c := &Core{DB: db, Now: now, Token: "mod_" + randHex(tokenBytes), WebhookSecret: "whsec_" + randHex(tokenBytes),
 		Profile:  quickbooks.Profile{FirmName: "Sample Law Co", TimeZone: "America/Chicago", Currency: "USD"},
 		Settings: DefaultSettings(), Secrets: map[string]string{},
 		users: map[string]*User{}, contacts: map[string]*quickbooks.BooksContact{}, matters: map[string]*MatterRec{},
@@ -143,13 +144,20 @@ func (c *Core) newID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	ms := uint64(c.Now().UnixMilli())
-	for i := 0; i < 6; i++ {
-		b[i] = byte(ms >> (40 - 8*i))
-	}
-	b[6] = (b[6] & 0x0f) | 0x70
-	b[8] = (b[8] & 0x3f) | 0x80
+	binary.BigEndian.PutUint16(b[:uuidMillisHigh], uint16(ms>>32))
+	binary.BigEndian.PutUint32(b[uuidMillisHigh:uuidMillisEnd], uint32(ms))
+	b[uuidVersionByte] = (b[uuidVersionByte] & 0x0f) | 0x70
+	b[uuidVariantByte] = (b[uuidVariantByte] & 0x3f) | 0x80
 	s := hex.EncodeToString(b[:])
-	return s[0:8] + "-" + s[8:12] + "-" + s[12:16] + "-" + s[16:20] + "-" + s[20:]
+	var out strings.Builder
+	from := zero
+	for _, at := range uuidDashes {
+		out.WriteString(s[from:at])
+		out.WriteByte('-')
+		from = at
+	}
+	out.WriteString(s[from:])
+	return out.String()
 }
 
 func (c *Core) stub(table, id string) {
@@ -241,7 +249,7 @@ func (c *Core) AddTrustAccount(name string) string {
 func (c *Core) ContextToken(userID, matterID string) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	t := "ctx_" + randHex(16)
+	t := "ctx_" + randHex(tokenBytes)
 	c.tokens[t] = ctxToken{user: userID, matter: matterID}
 	return t
 }
@@ -327,7 +335,7 @@ func (c *Core) recalc(inv *quickbooks.Invoice) {
 	}
 	inv.AmountPaidCents = paid
 	inv.BalanceDueCents = inv.TotalCents - paid - inv.WriteOffCents
-	if inv.BalanceDueCents <= 0 && inv.Status != "void" && inv.Status != "draft" {
+	if inv.BalanceDueCents <= zero64 && inv.Status != "void" && inv.Status != "draft" {
 		inv.Status = "paid"
 	} else if inv.Status == "paid" {
 		inv.Status = "sent"
@@ -524,7 +532,7 @@ func (c *Core) walled(matterID string) bool {
 // matter (the module's subscription runs as the books reader) or events are muted.
 func (c *Core) emit(action, recordType, recordID, matterID string) {
 	c.mu.Lock()
-	ev := wire.EventPayload{ID: "evt_" + randHex(8), Action: action, RecordType: recordType, RecordID: recordID,
+	ev := wire.EventPayload{ID: "evt_" + randHex(eventIDBytes), Action: action, RecordType: recordType, RecordID: recordID,
 		MatterID: matterID, OccurredAt: c.Now().UTC().Format(time.RFC3339Nano), Module: quickbooks.ID}
 	drop := c.Muted || c.Module == nil || (matterID != "" && c.walled(matterID))
 	if action == "contact.updated" && c.contactHidden(recordID) {
@@ -770,17 +778,17 @@ func (c *Core) booksAPI(w http.ResponseWriter, r *http.Request, p principal, par
 		return
 	}
 	switch {
-	case len(parts) == 2 && parts[1] == "profile":
+	case len(parts) == two && parts[one] == "profile":
 		send(w, c.Profile)
-	case len(parts) == 3 && parts[1] == "matters":
-		m := c.matters[parts[2]]
+	case len(parts) == three && parts[one] == "matters":
+		m := c.matters[parts[two]]
 		if m == nil || m.Walled {
 			c.fail(w, http.StatusNotFound, "not_found")
 			return
 		}
 		send(w, m.BooksMatter)
-	case len(parts) == 3 && parts[1] == "contacts":
-		ct := c.contacts[parts[2]]
+	case len(parts) == three && parts[one] == "contacts":
+		ct := c.contacts[parts[two]]
 		if ct == nil || c.contactHidden(ct.ID) {
 			c.fail(w, http.StatusNotFound, "not_found")
 			return
@@ -794,8 +802,8 @@ func (c *Core) booksAPI(w http.ResponseWriter, r *http.Request, p principal, par
 // page writes one page of a list, with the cursor as an offset.
 func page[T any](w http.ResponseWriter, r *http.Request, all []T) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 200 {
-		limit = 50
+	if limit <= zero || limit > pageMax {
+		limit = pageDefault
 	}
 	off, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
 	end := off + limit
@@ -864,8 +872,8 @@ func (c *Core) read(w http.ResponseWriter, r *http.Request, p principal, parts [
 			denied()
 			return
 		}
-		if len(parts) == 2 {
-			inv := c.invoices[parts[1]]
+		if len(parts) == two {
+			inv := c.invoices[parts[one]]
 			if inv == nil || !c.sees(p, inv.MatterID) {
 				notFound()
 				return
@@ -889,8 +897,8 @@ func (c *Core) read(w http.ResponseWriter, r *http.Request, p principal, parts [
 			denied()
 			return
 		}
-		if len(parts) == 2 {
-			pm := c.payments[parts[1]]
+		if len(parts) == two {
+			pm := c.payments[parts[one]]
 			if pm == nil || !c.sees(p, pm.MatterID) {
 				notFound()
 				return
@@ -914,8 +922,8 @@ func (c *Core) read(w http.ResponseWriter, r *http.Request, p principal, parts [
 			denied()
 			return
 		}
-		if len(parts) == 2 {
-			e := c.entries[parts[1]]
+		if len(parts) == two {
+			e := c.entries[parts[one]]
 			if e == nil || !c.sees(p, e.MatterID) {
 				notFound()
 				return
@@ -942,7 +950,7 @@ func (c *Core) read(w http.ResponseWriter, r *http.Request, p principal, parts [
 		sort.Slice(all, func(i, j int) bool { return all[i].ID < all[j].ID })
 		page(w, r, all)
 	case "trust":
-		if len(parts) != 2 || parts[1] != "balances" || !c.scope(p, "trust:read") {
+		if len(parts) != two || parts[one] != "balances" || !c.scope(p, "trust:read") {
 			denied()
 			return
 		}
@@ -962,8 +970,8 @@ func (c *Core) read(w http.ResponseWriter, r *http.Request, p principal, parts [
 			denied()
 			return
 		}
-		if len(parts) == 2 {
-			x := c.expenses[parts[1]]
+		if len(parts) == two {
+			x := c.expenses[parts[one]]
 			if x == nil || !c.sees(p, x.MatterID) {
 				notFound()
 				return
@@ -979,11 +987,11 @@ func (c *Core) read(w http.ResponseWriter, r *http.Request, p principal, parts [
 		}
 		page(w, r, all)
 	case "matters":
-		if p.books() || len(parts) != 2 || !c.has("matters:read") {
+		if p.books() || len(parts) != two || !c.has("matters:read") {
 			denied()
 			return
 		}
-		m := c.matters[parts[1]]
+		m := c.matters[parts[one]]
 		if m == nil || !c.sees(p, m.ID) {
 			notFound()
 			return

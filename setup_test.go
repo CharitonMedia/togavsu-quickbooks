@@ -36,7 +36,7 @@ func TestMODQBO01Install(t *testing.T) {
 		}
 	}
 	var n int
-	if err := e.db.QueryRow(`SELECT count(*) FROM core.module_migrations WHERE module = 'quickbooks'`).Scan(&n); err != nil || n != 3 {
+	if err := e.db.QueryRow(`SELECT count(*) FROM core.module_migrations WHERE module = 'quickbooks'`).Scan(&n); err != nil || n != len(migrations(t)) {
 		t.Fatalf("migrations recorded %d (%v)", n, err)
 	}
 	// declining books:read cancels the install and creates nothing
@@ -56,9 +56,6 @@ func TestMODQBO01Install(t *testing.T) {
 	_ = e.db.QueryRow(`SELECT to_regnamespace('mod_quickbooks')::text`).Scan(&schema)
 	if schema.Valid {
 		t.Fatal("the schema exists after a cancelled install")
-	}
-	if _, err := quickbooks.Build(nil, nil); !errors.Is(err, quickbooks.ErrPackagingUnavailable) {
-		t.Fatalf("packaging: %v", err)
 	}
 }
 

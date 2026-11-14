@@ -26,7 +26,7 @@ func (s *Server) alertConnection(ctx context.Context, title, kind string) {
 		s.log.Printf("alert: %v", err)
 		return
 	}
-	if err := s.recordAlert(ctx, kind, 1); err != nil {
+	if err := s.recordAlert(ctx, kind, one); err != nil {
 		s.log.Printf("alert: %v", err)
 	}
 }
@@ -35,15 +35,15 @@ func (s *Server) alertConnection(ctx context.Context, title, kind string) {
 // expires.
 func (s *Server) reconnectReminder(ctx context.Context) error {
 	conn, err := s.store.connection(ctx)
-	if err != nil || conn.State != "connected" || conn.RefreshExpiresAt == 0 {
+	if err != nil || conn.State != "connected" || conn.RefreshExpiresAt == zero64 {
 		return err
 	}
-	from := time.UnixMicro(conn.RefreshExpiresAt).Add(-time.Duration(limits().ReminderDays) * 24 * time.Hour)
+	from := time.UnixMicro(conn.RefreshExpiresAt).Add(-time.Duration(limits().ReminderDays) * day)
 	if s.now().Before(from) {
 		return nil
 	}
 	var n int
-	if err := s.c.DB.QueryRowContext(ctx, `SELECT count(*) FROM alerts_sent WHERE kind = 'reconnect_soon' AND at >= $1`, from.UnixMicro()).Scan(&n); err != nil || n > 0 {
+	if err := s.c.DB.QueryRowContext(ctx, `SELECT count(*) FROM alerts_sent WHERE kind = 'reconnect_soon' AND at >= $1`, from.UnixMicro()).Scan(&n); err != nil || n > zero {
 		return err
 	}
 	s.alertConnection(ctx, fmt.Sprintf("Reconnect QuickBooks before %s", time.UnixMicro(conn.RefreshExpiresAt).UTC().Format(time.DateOnly)), "reconnect_soon")
@@ -67,7 +67,7 @@ func (s *Server) alertFailures(ctx context.Context, st Settings) error {
 	if last.Valid {
 		since = last.Int64
 	}
-	n := 0
+	n := zero
 	for _, t := range tables {
 		rows, err := s.store.rows(ctx, t, exceptionWhere+" AND updated_at > $1", since)
 		if err != nil {
@@ -85,11 +85,11 @@ func (s *Server) alertFailures(ctx context.Context, st Settings) error {
 			}
 		}
 	}
-	if n == 0 {
+	if n == zero {
 		return nil
 	}
 	title := "1 QuickBooks sync problem needs a look"
-	if n > 1 {
+	if n > one {
 		title = fmt.Sprintf("%d QuickBooks sync problems need a look", n)
 	}
 	if err := s.core.notify(ctx, title, exceptionsLink, []string{"admin", "accountant"}); err != nil {

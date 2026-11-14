@@ -32,9 +32,10 @@ CREATE TABLE received_events (
   received_at BIGINT NOT NULL
 );
 
--- A QuickBooks bank account per Togavsu trust account, in place of the default.
+-- A QuickBooks bank account per Togavsu trust account, in place of the default. Its link
+-- to core.trust_accounts is migration 0004, which waits on CORE-22 (pending.yaml).
 CREATE TABLE trust_bank_map (
-  trust_account_id TEXT PRIMARY KEY REFERENCES core.trust_accounts (id) ON DELETE RESTRICT,
+  trust_account_id TEXT PRIMARY KEY,
   qbo_account TEXT NOT NULL,
   set_by TEXT REFERENCES core.users (id) ON DELETE RESTRICT,
   set_at BIGINT NOT NULL DEFAULT 0

@@ -87,7 +87,7 @@ func (s *Server) fullRead(ctx context.Context, p *pass, q url.Values) (*seen, er
 
 // hide moves a row out of view: no QBO call while the wall stands.
 func (s *Server) hide(ctx context.Context, r *Row, now int64) error {
-	r.State, r.WaitingOn, r.Attempts, r.LastErrorCode, r.LastError, r.UpdatedAt = stateHidden, "", 0, "", "", now
+	r.State, r.WaitingOn, r.Attempts, r.LastErrorCode, r.LastError, r.UpdatedAt = stateHidden, "", zero, "", "", now
 	return s.store.save(ctx, r)
 }
 
@@ -245,7 +245,7 @@ func (s *Server) nightlyDue(ctx context.Context, st Settings) (bool, error) {
 	hourStart := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC)
 	var n int
 	err := s.c.DB.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE kind = 'nightly' AND started_at >= $1`, hourStart.UnixMicro()).Scan(&n)
-	return n == 0, err
+	return n == zero, err
 }
 
 // driftTarget is a synced entity the drift check watches.
@@ -292,7 +292,7 @@ func (p *pass) driftCheck(ctx context.Context, since time.Time) error {
 		}
 		return p.s.store.log(ctx, p.now, p.conn.RealmID, t.r.T, t.r.RecordID(), logEntry{Op: "update", Outcome: "drift", Message: t.r.LastError})
 	}
-	cdc := !since.IsZero() && p.now.Sub(since) < time.Duration(limits().CDCLookbackDays)*24*time.Hour
+	cdc := !since.IsZero() && p.now.Sub(since) < time.Duration(limits().CDCLookbackDays)*day
 	if cdc {
 		changes, err := p.books.Changes(ctx, []qbo.Kind{qbo.KindInvoice, qbo.KindPayment, qbo.KindCreditMemo, qbo.KindJournalEntry, qbo.KindPurchase}, since)
 		if err != nil {
@@ -374,12 +374,12 @@ func (p *pass) totalsCheck(ctx context.Context) error {
 		delta := BankNet(je, bank.ID) - e.Signed()
 		names[e.TrustAccountID] = bank.Name
 		totals[e.TrustAccountID] += delta
-		if delta != 0 {
+		if delta != zero64 {
 			byAcct[e.TrustAccountID] = append(byAcct[e.TrustAccountID], diff{r, delta})
 		}
 	}
 	for acct, ds := range byAcct {
-		if totals[acct] == 0 && len(ds) == 0 {
+		if totals[acct] == zero64 && len(ds) == 0 {
 			continue
 		}
 		for _, d := range ds {

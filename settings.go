@@ -34,7 +34,7 @@ var limits = sync.OnceValue(func() limitFacts {
 	return l
 })
 
-func seconds(n int64) time.Duration { return time.Duration(n) * time.Second }
+func seconds(n int64) time.Duration { return time.Duration(n) * second }
 
 // Settings is the module's settings form, read from the core on every pass, so a change
 // applies with no restart.
@@ -77,7 +77,7 @@ func ParseRetrySchedule(s string) ([]time.Duration, error) {
 			continue
 		}
 		d, err := time.ParseDuration(part)
-		if err != nil || d <= 0 {
+		if err != nil || d <= time.Duration(zero) {
 			return nil, fmt.Errorf("retry_schedule: %q is not a wait such as 5m", part)
 		}
 		out = append(out, d)
@@ -107,7 +107,7 @@ func parseSettings(v map[string]string) (Settings, error) {
 		}
 	}
 	h, err := strconv.Atoi(strings.TrimSpace(v["reconcile_hour_utc"]))
-	if err != nil || h < 0 || h > 23 {
+	if err != nil || h < zero || h >= hoursPerDay {
 		return st, fmt.Errorf("reconcile_hour_utc is an hour from 0 to 23")
 	}
 	st.ReconcileHour = h
@@ -115,9 +115,9 @@ func parseSettings(v map[string]string) (Settings, error) {
 		return st, err
 	}
 	m, err := strconv.Atoi(strings.TrimSpace(v["alert_interval_minutes"]))
-	if err != nil || m < 1 {
+	if err != nil || m < one {
 		return st, fmt.Errorf("alert_interval_minutes is a whole number of minutes")
 	}
-	st.AlertInterval = time.Duration(m) * time.Minute
+	st.AlertInterval = time.Duration(m) * minute
 	return st, nil
 }

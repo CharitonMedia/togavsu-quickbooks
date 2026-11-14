@@ -13,7 +13,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"database/sql"
-	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -29,21 +28,23 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	quickbooks "github.com/CharitonMedia/togavsu-quickbooks"
+	"github.com/CharitonMedia/togavsu/pkg/modulekit"
 )
 
 func main() {
-	if len(os.Args) < 2 {
+	args := os.Args[one:]
+	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: quickbooks serve|package [flags]")
-		os.Exit(2)
+		os.Exit(usageExit)
 	}
-	switch os.Args[1] {
+	switch args[0] {
 	case "serve":
-		serve(os.Args[2:])
+		serve(args[one:])
 	case "package":
-		pack(os.Args[2:])
+		pack(args[one:])
 	default:
 		fmt.Fprintln(os.Stderr, "usage: quickbooks serve|package [flags]")
-		os.Exit(2)
+		os.Exit(usageExit)
 	}
 }
 
@@ -98,8 +99,9 @@ func serve(args []string) {
 	}
 }
 
-// pack builds the signed package. Signing waits on a public signing package or CLI from
-// the core; until then the stub packager reports that it is unavailable.
+// pack builds and signs the installable package through the core's module kit, names
+// each part pending.yaml held back and the CORE item it waits on, and prints the public
+// key the admin adds as a trusted signing key.
 func pack(args []string) {
 	fs := flag.NewFlagSet("package", flag.ExitOnError)
 	keyFile := fs.String("key", "", "file holding a base64 ed25519 seed")
@@ -109,15 +111,23 @@ func pack(args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	seed, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
-	if err != nil || len(seed) != ed25519.SeedSize {
-		log.Fatal("the key file must hold a base64 ed25519 seed")
-	}
-	signed, err := quickbooks.Build(quickbooks.StubPackager{}, ed25519.NewKeyFromSeed(seed))
+	priv, err := modulekit.ParseSeed(string(raw))
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := os.WriteFile(*out, signed, 0o644); err != nil {
+	signed, ip, err := quickbooks.Build(priv)
+	if err != nil {
 		log.Fatal(err)
 	}
+	for _, h := range ip.Held {
+		fmt.Fprintln(os.Stderr, h.String())
+	}
+	for _, e := range ip.Unused {
+		fmt.Fprintf(os.Stderr, "pending %s (%s) holds nothing back: the core accepts it or the package no longer has it; drop its entry\n", e.Part(), e.Core)
+	}
+	if err := os.WriteFile(*out, signed, packageMode); err != nil {
+		log.Fatal(err)
+	}
+	pub := priv.Public().(ed25519.PublicKey)
+	fmt.Printf("wrote %s, signed by key %s\npublic key (add it as a trusted signing key):\n%s", *out, modulekit.KeyID(pub), modulekit.PublicKeyPEM(pub))
 }

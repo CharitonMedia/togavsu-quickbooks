@@ -67,12 +67,13 @@ func (c *core) do(ctx context.Context, method, path, contextToken string, body, 
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		var p struct {
 			Code string `json:"code"`
 		}
 		_ = json.NewDecoder(resp.Body).Decode(&p)
-		return &CoreError{Status: resp.StatusCode, Code: p.Code, Path: strings.SplitN(path, "?", 2)[0]}
+		bare, _, _ := strings.Cut(path, "?")
+		return &CoreError{Status: resp.StatusCode, Code: p.Code, Path: bare}
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
 		_, _ = io.Copy(io.Discard, resp.Body)

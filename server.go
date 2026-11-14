@@ -61,7 +61,7 @@ func New(c Config) *Server {
 			Concurrent: limits().Concurrent, Now: c.Now}
 	}
 	return &Server{c: c, core: &core{base: c.Core, token: c.Token, hc: c.HTTP, pageLimit: limits().CorePageLimit},
-		store: &store{db: c.DB}, log: log.New(c.Log, "quickbooks ", 0)}
+		store: &store{db: c.DB}, log: log.New(c.Log, "quickbooks ", zero)}
 }
 
 func (s *Server) now() time.Time { return s.c.Now().UTC() }
@@ -180,34 +180,47 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) receive(ctx context.Context, ev wire.EventPayload) error {
 	now := s.now().UnixMicro()
-	res, err := s.c.DB.ExecContext(ctx, `INSERT INTO received_events (event_id, type, record_id, received_at) VALUES ($1, $2, $3, $4) ON CONFLICT (event_id) DO NOTHING`,
+	var customers []*Row
+	if ev.Action == "contact.updated" {
+		var err error
+		if customers, err = s.store.customerRows(ctx, ev.RecordID); err != nil {
+			return err
+		}
+	}
+	// The event is recorded and its rows queued together, so an event whose queueing
+	// failed is taken again when the core redelivers it.
+	tx, err := s.c.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `INSERT INTO received_events (event_id, type, record_id, received_at) VALUES ($1, $2, $3, $4) ON CONFLICT (event_id) DO NOTHING`,
 		ev.ID, ev.Action, ev.RecordID, now)
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if n, _ := res.RowsAffected(); n == zero64 {
 		return nil // delivered before
 	}
 	prefix, _, _ := strings.Cut(ev.Action, ".")
 	switch {
 	case prefix == "invoice":
-		return s.store.queue(ctx, tInvoice, ev.RecordID, now)
+		err = queueOn(ctx, tx, tInvoice, ev.RecordID, now)
 	case prefix == "payment":
-		return s.store.queue(ctx, tPayment, ev.RecordID, now)
+		err = queueOn(ctx, tx, tPayment, ev.RecordID, now)
 	case prefix == "expense":
-		return s.store.queue(ctx, tExpense, ev.RecordID, now)
+		err = queueOn(ctx, tx, tExpense, ev.RecordID, now)
 	case ev.Action == "trust.entry_posted":
-		return s.store.queue(ctx, tTrust, ev.RecordID, now)
+		err = queueOn(ctx, tx, tTrust, ev.RecordID, now)
 	case ev.Action == "contact.updated":
-		rows, err := s.store.customerRows(ctx, ev.RecordID)
-		if err != nil {
-			return err
-		}
-		for _, r := range rows {
-			if err := s.store.queue(ctx, tCustomer, r.Key, now); err != nil {
-				return err
+		for _, r := range customers {
+			if err = queueOn(ctx, tx, tCustomer, r.Key, now); err != nil {
+				break
 			}
 		}
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
