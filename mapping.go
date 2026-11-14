@@ -343,6 +343,9 @@ func allDigits(s string) bool {
 // ResolveAccount finds a mapping value (an Id or the exact full name).
 func ResolveAccount(value string, list []qbo.Account) (qbo.Account, bool) {
 	value = strings.TrimSpace(value)
+	if value == "" {
+		return qbo.Account{}, false
+	}
 	for _, a := range list {
 		if (allDigits(value) && a.ID == value) || a.FullyQualifiedName == value || (a.FullyQualifiedName == "" && a.Name == value) {
 			return a, true
@@ -354,6 +357,9 @@ func ResolveAccount(value string, list []qbo.Account) (qbo.Account, bool) {
 // ResolveItem finds an item mapping value.
 func ResolveItem(value string, list []qbo.Item) (qbo.Item, bool) {
 	value = strings.TrimSpace(value)
+	if value == "" {
+		return qbo.Item{}, false
+	}
 	for _, i := range list {
 		if (allDigits(value) && i.ID == value) || i.FullyQualifiedName == value || (i.FullyQualifiedName == "" && i.Name == value) {
 			return i, true
