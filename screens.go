@@ -90,9 +90,11 @@ var (
 	moneyRoles  = []string{"admin", "accountant"}
 )
 
-// Counts are the widget's three numbers.
+// Counts are the widget's numbers. SyncedToday counts rows that reached QuickBooks since
+// midnight in the firm's time zone.
 type Counts struct {
-	Synced     int `json:"synced"`
+	SyncedToday int `json:"synced_today"`
+	Synced      int `json:"synced"`
 	Pending    int `json:"pending"`
 	Exceptions int `json:"exceptions"`
 }
@@ -101,6 +103,8 @@ type Counts struct {
 // returns; the rest move to hidden. With q set the books reader lists only that slice
 // (one matter).
 func (s *Server) visibleRows(ctx context.Context, q url.Values, withCustomers bool) ([]*Row, *seen, *pass, error) {
+	s.work.Lock() // it may move rows to hidden
+	defer s.work.Unlock()
 	p, err := s.newPass(ctx, false)
 	if err != nil {
 		return nil, nil, nil, err
@@ -150,7 +154,7 @@ func isException(r *Row) bool {
 	return r.State == stateFailed || r.State == stateDrift || (r.State == stateSynced && r.LastErrorCode == "paid_without_payments")
 }
 
-func count(rows []*Row) Counts {
+func count(rows []*Row, dayStart int64) Counts {
 	var c Counts
 	for _, r := range rows {
 		switch {
@@ -159,6 +163,9 @@ func count(rows []*Row) Counts {
 		case r.State == stateSynced || r.State == stateAcknowledged:
 			if r.T != tCustomer {
 				c.Synced++
+				if r.SyncedAt.Valid && r.SyncedAt.Int64 >= dayStart {
+					c.SyncedToday++
+				}
 			}
 		case r.State == statePending:
 			c.Pending++
@@ -180,7 +187,7 @@ func (s *Server) widgetData(ctx context.Context, v Viewer, r *http.Request) (any
 	if !v.Has(moneyRoles...) {
 		return nil, errNotFound
 	}
-	rows, _, _, err := s.visibleRows(ctx, nil, true)
+	rows, _, p, err := s.visibleRows(ctx, nil, true)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +196,7 @@ func (s *Server) widgetData(ctx context.Context, v Viewer, r *http.Request) (any
 		return nil, err
 	}
 	tab := "/modules/" + ID + "/tabs/books?status="
-	return WidgetView{Base: s.base(ctx, v, r), Connection: conn.State, Company: conn.CompanyName, Counts: count(rows),
+	return WidgetView{Base: s.base(ctx, v, r), Connection: conn.State, Company: conn.CompanyName, Counts: count(rows, p.dayStart()),
 		Links: map[string]string{"synced": tab + "synced", "pending": tab + "pending", "exceptions": tab + "exceptions"}}, nil
 }
 
@@ -254,7 +261,7 @@ func (s *Server) booksData(ctx context.Context, v Viewer, r *http.Request) (any,
 	if err != nil {
 		return nil, err
 	}
-	out := BooksView{Base: b, CanAct: true, Connection: conn.State, Company: conn.CompanyName, Counts: count(rows), Status: r.URL.Query().Get("status")}
+	out := BooksView{Base: b, CanAct: true, Connection: conn.State, Company: conn.CompanyName, Counts: count(rows, p.dayStart()), Status: r.URL.Query().Get("status")}
 	if out.Status == "" {
 		out.Status = "exceptions"
 	}
@@ -433,7 +440,7 @@ type MatterView struct {
 }
 
 func (s *Server) matterData(ctx context.Context, v Viewer, r *http.Request) (any, error) {
-	if !v.Has("admin", "accountant", "attorney", "staff") {
+	if !v.Has("admin", "attorney", "staff") {
 		return nil, errNotFound
 	}
 	id := r.URL.Query().Get("matter_id")
@@ -534,4 +541,10 @@ func (s *Server) createMissing(ctx context.Context) (string, error) {
 		return "Every default account and item already exists.", nil
 	}
 	return "Created " + strings.Join(made, ", ") + ".", nil
+}
+
+// dayStart is midnight today in the firm's time zone, in microseconds.
+func (p *pass) dayStart() int64 {
+	l := p.now.In(p.tz)
+	return time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, p.tz).UnixMicro()
 }

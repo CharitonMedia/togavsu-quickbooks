@@ -145,6 +145,9 @@ func redirectURI(r *http.Request) string {
 // newNonce stores a one-use OAuth state bound to the admin who will press Connect.
 func (s *Server) newNonce(ctx context.Context, userID, redirect string) (string, error) {
 	n := randomToken()
+	if _, err := s.c.DB.ExecContext(ctx, `DELETE FROM oauth_states WHERE expires_at < $1`, s.now().UnixMicro()); err != nil {
+		return "", err
+	}
 	_, err := s.c.DB.ExecContext(ctx, `INSERT INTO oauth_states (state, user_id, redirect_uri, expires_at) VALUES ($1, $2, $3, $4)`,
 		n, userID, redirect, s.now().Add(seconds(limits().StateSeconds)).UnixMicro())
 	return n, err

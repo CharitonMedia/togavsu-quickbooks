@@ -101,9 +101,11 @@ help:
         that was missed.
 
         **Agent endpoints:** every action on these screens is also a JSON endpoint under
-        `/m/quickbooks/api/` (status, books, retry, repush, acknowledge, sync-now, setup,
-        connect, disconnect, create-missing, trust-bank-map, client-secret, reset), called
-        with a context token. The OpenAPI document is at `/m/quickbooks/api/openapi.json`.
+        `/m/quickbooks/api/` (status, books, setup, matter, retry, repush, acknowledge,
+        sync-now, disconnect, create-missing, trust-bank-map, client-secret, reset), called
+        with a context token. Connecting needs a person at Intuit's sign-in page, so the
+        setup endpoint returns a one-use `connect_url` for an admin to open in a browser.
+        The OpenAPI document is at `/m/quickbooks/api/openapi.json`.
     - id: connect
       title: Connecting QuickBooks
       keywords: [connect, oauth, sandbox, intuit]

@@ -320,3 +320,46 @@ func TestMODQBO27Customers(t *testing.T) {
 		t.Fatalf("after contact.updated %+v", jane)
 	}
 }
+
+func TestTrustBankMap(t *testing.T) {
+	e := newEnv(t)
+	second := e.core.AddTrustAccount("Second Trust")
+	admin := e.ctxFor(e.admin, "")
+	e.mustAct("trust-bank-map", admin, map[string]string{"trust_account_id": second, "qbo_account": "Second Trust"})
+	setup := decode[quickbooks.SetupView](t, e.get("/api/setup", admin))
+	found := false
+	for _, b := range setup.TrustBanks {
+		found = found || (b.TrustAccountID == second && b.QBOAccount == "Second Trust")
+	}
+	if !found {
+		t.Fatalf("map %+v", setup.TrustBanks)
+	}
+	a := e.core.PostTrust(e.matter, e.trust, "deposit", 1000, "Into the default trust bank")
+	b := e.core.PostTrust(e.matter, second, "deposit", 2000, "Into the second trust bank")
+	e.tick()
+	bal := e.qb.Balances(realmA)
+	if bal["36"] != 1000 || bal["37"] != 2000 || e.trustRow(a).State != "synced" || e.trustRow(b).State != "synced" {
+		t.Fatalf("balances %v", bal)
+	}
+	// a mapped account that is not a Bank stops trust posting with mapping_invalid
+	e.mustAct("trust-bank-map", admin, map[string]string{"trust_account_id": second, "qbo_account": "Legal Fee Income"})
+	c := e.core.PostTrust(e.matter, e.trust, "deposit", 500, "Blocked by the map")
+	e.tick()
+	if r := e.trustRow(c); r.State != "failed" || r.Code != "mapping_invalid" {
+		t.Fatalf("row %+v", r)
+	}
+	if r := e.act("trust-bank-map", admin, map[string]string{"trust_account_id": "no-such-account", "qbo_account": "Second Trust"}); r.status != http.StatusBadRequest {
+		t.Fatalf("unknown trust account %d", r.status)
+	}
+	w := decode[quickbooks.WidgetView](t, e.get("/api/status", admin))
+	if w.Counts.SyncedToday != 2 {
+		t.Fatalf("synced today %+v", w.Counts)
+	}
+	if r := e.get("/api/matter", e.ctxFor(e.accountant, e.matter)); r.status != http.StatusNotFound {
+		t.Fatalf("matter tab for the accountant %d", r.status)
+	}
+	m := decode[quickbooks.MatterView](t, e.get("/api/matter", e.ctxFor(e.staff, e.matter)))
+	if m.Matter.Number != "2026-0042" || len(m.Lines) != 3 {
+		t.Fatalf("matter tab %+v", m)
+	}
+}
